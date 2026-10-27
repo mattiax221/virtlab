@@ -41,3 +41,10 @@ yarn-error.log*
 next-env.d.ts
 netlab_landing.webp
 *.webp
+
+# VM artifacts (ISO / disco Windows — non committare)
+/vm/*.iso
+/vm/*.qcow2
+/vm/*.img
+!/vm/README.md
+!/vm/.gitkeep

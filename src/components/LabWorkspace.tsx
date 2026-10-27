@@ -152,6 +152,12 @@ export function LabWorkspace() {
         <ToolButton onClick={() => addDevice("router")}>+ Router</ToolButton>
 
         <div className="ml-auto flex flex-wrap gap-2">
+          <a
+            href="/vnc"
+            className="rounded-md bg-orange-700/90 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-orange-600 sm:text-sm"
+          >
+            Windows VNC
+          </a>
           <ToolButton
             onClick={() => {
               setState(createDemoLab());
