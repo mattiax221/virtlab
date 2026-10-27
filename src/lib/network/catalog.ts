@@ -3,6 +3,7 @@
  * (modelli e cavi tipici della palette PT — non asset Cisco).
  */
 import type { DeviceKind } from "./types";
+import { isAccessPoint } from "./types";
 
 export type CableKind =
   | "auto"
@@ -77,59 +78,96 @@ export const PT_PALETTE: { title: string; types: DeviceKind[] }[] = [
       "pc",
       "laptop",
       "server",
+      "meraki_server",
+      "network_controller",
       "printer",
       "ip_phone",
+      "voip_device",
+      "analog_phone",
+      "tv",
       "tablet",
       "smartphone",
-      "tv",
-      "analog_phone",
+      "generic_wireless",
+      "generic_wired",
+      "sniffer",
     ],
   },
   {
     title: "Switches",
     types: [
-      "hub",
-      "switch",
-      "switch_2950",
-      "switch_2950t",
       "switch_2960",
+      "switch",
+      "switch_empty",
       "switch_3560",
       "switch_3650",
       "switch_ie2000",
-      "multilayer_switch",
+      "switch_ie3400",
+      "switch_ie9320",
       "bridge",
-      "repeater",
+      "switch_2950",
+      "switch_2950t",
+      "multilayer_switch",
     ],
   },
   {
     title: "Routers",
     types: [
-      "router",
-      "router_1841",
+      "router_pt8200",
+      "router_4331",
+      "router_4321",
+      "router_ir8340",
       "router_1941",
-      "router_2811",
       "router_2901",
       "router_2911",
-      "router_4321",
-      "router_4331",
-      "wireless_router",
-      "home_router",
+      "router_819iox",
+      "router_819hgw",
+      "router_829",
+      "router_1240",
+      "router_ir1101",
+      "router",
+      "router_empty",
+      "router_1841",
+      "router_2620xm",
+      "router_2621xm",
+      "router_2811",
     ],
+  },
+  {
+    title: "Hubs",
+    types: ["hub", "repeater", "coaxial_splitter"],
   },
   {
     title: "Wireless",
-    types: ["access_point", "ap_n", "lap", "wlc"],
-  },
-  {
-    title: "Security / WAN",
     types: [
-      "firewall_asa5505",
-      "firewall_asa5506",
-      "modem_dsl",
-      "modem_cable",
-      "cloud",
+      "meraki_ap",
+      "lap",
+      "ap_3702i",
+      "wlc",
+      "wlc_3504",
+      "wlc_2504",
+      "home_router",
+      "access_point",
+      "ap_a",
+      "ap_ac",
+      "ap_n",
+      "wireless_router",
+      "home_gateway",
+      "cell_tower",
       "co_server",
     ],
+  },
+  {
+    title: "Security",
+    types: [
+      "firewall_isa3000",
+      "firewall_asa5506",
+      "firewall_asa5505",
+      "cyber_observer",
+    ],
+  },
+  {
+    title: "WAN Emulation",
+    types: ["cloud", "cloud_empty", "modem_dsl", "modem_cable"],
   },
 ];
 
@@ -138,37 +176,31 @@ export function inferCable(
   bType: DeviceKind,
 ): Exclude<CableKind, "auto"> {
   const cat = (t: DeviceKind) => {
-    if (
-      t === "pc" ||
-      t === "laptop" ||
-      t === "server" ||
-      t === "printer" ||
-      t === "tablet" ||
-      t === "smartphone" ||
-      t === "tv" ||
-      t === "ip_phone"
-    )
-      return "end";
+    if (DEVICE_END.has(t)) return "end";
     if (t === "hub" || t === "bridge" || t === "repeater") return "hub";
+    if (t === "coaxial_splitter") return "splitter";
     if (t.startsWith("switch") || t === "multilayer_switch") return "switch";
     if (
       t.startsWith("router") ||
       t === "wireless_router" ||
       t === "home_router" ||
+      t === "home_gateway" ||
       t.startsWith("firewall")
     )
       return "router";
     if (t.startsWith("modem")) return "modem";
-    if (t === "cloud" || t === "co_server") return "cloud";
-    if (t === "access_point" || t === "ap_n" || t === "lap" || t === "wlc")
+    if (t === "cloud" || t === "cloud_empty" || t === "co_server" || t === "cell_tower")
+      return "cloud";
+    if (isAccessPoint(t) || t.startsWith("wlc") || t === "generic_wireless")
       return "wireless";
-    if (t === "analog_phone") return "phone";
+    if (t === "analog_phone" || t === "voip_device") return "phone";
     return "other";
   };
   const A = cat(aType);
   const B = cat(bType);
-  if (A === "modem" || B === "modem") {
-    if (A === "cloud" || B === "cloud") return "coaxial";
+  if (A === "modem" || B === "modem" || A === "splitter" || B === "splitter") {
+    if (A === "cloud" || B === "cloud" || A === "splitter" || B === "splitter")
+      return "coaxial";
     return "straight";
   }
   if (A === "phone" || B === "phone") return "phone";
@@ -185,3 +217,20 @@ export function inferCable(
     return "cross";
   return "straight";
 }
+
+const DEVICE_END = new Set<DeviceKind>([
+  "pc",
+  "laptop",
+  "server",
+  "meraki_server",
+  "network_controller",
+  "printer",
+  "tablet",
+  "smartphone",
+  "tv",
+  "ip_phone",
+  "voip_device",
+  "generic_wireless",
+  "generic_wired",
+  "sniffer",
+]);

@@ -18,6 +18,7 @@ import {
   defaultVlans,
   isL3Device,
   isManagedSwitch,
+  isWifiCapable,
   type Device,
   type DeviceKind,
   type InstalledModule,
@@ -61,13 +62,7 @@ export function createDevice(
     device.vlans = defaultVlans().filter((v) => v.id === 1);
     device.macTable = [];
   }
-  if (
-    type === "access_point" ||
-    type === "ap_n" ||
-    type === "lap" ||
-    type === "wireless_router" ||
-    type === "home_router"
-  ) {
+  if (isWifiCapable(type)) {
     device.wifi = {
       ssid: `NetLab-${name}`,
       security: "wpa2",
@@ -77,7 +72,7 @@ export function createDevice(
       band: "2.4",
     };
   }
-  if (type === "server") {
+  if (type === "server" || type === "meraki_server") {
     device.services = {
       dhcp: {
         enabled: true,
@@ -946,11 +941,18 @@ export function nextDeviceName(state: LabState, type: DeviceKind): string {
   else if (type.startsWith("router")) prefix = "Router";
   else if (type.startsWith("firewall")) prefix = "ASA";
   else if (type === "hub") prefix = "Hub";
-  else if (type === "cloud") prefix = "Cloud";
+  else if (type === "cloud" || type === "cloud_empty") prefix = "Cloud";
   else if (type.startsWith("modem")) prefix = "Modem";
-  else if (type === "wireless_router" || type === "home_router") prefix = "WirelessRouter";
-  else if (type === "access_point" || type === "ap_n") prefix = "AccessPoint";
-  else if (type === "ip_phone") prefix = "IPPhone";
+  else if (
+    type === "wireless_router" ||
+    type === "home_router" ||
+    type === "home_gateway"
+  )
+    prefix = "WirelessRouter";
+  else if (type.startsWith("ap_") || type === "access_point" || type === "lap" || type === "meraki_ap")
+    prefix = "AccessPoint";
+  else if (type.startsWith("wlc")) prefix = "WLC";
+  else if (type === "ip_phone" || type === "voip_device") prefix = "IPPhone";
   else prefix = DEVICE_META[type].label.replace(/[^a-zA-Z0-9]/g, "").slice(0, 12) || "Dev";
 
   let n = 0;

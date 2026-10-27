@@ -40,10 +40,15 @@ export type WifiNetworkInfo = {
 export function isWifiAp(type: DeviceKind): boolean {
   return (
     type === "access_point" ||
+    type === "ap_a" ||
+    type === "ap_ac" ||
     type === "ap_n" ||
+    type === "ap_3702i" ||
     type === "lap" ||
+    type === "meraki_ap" ||
     type === "wireless_router" ||
-    type === "home_router"
+    type === "home_router" ||
+    type === "home_gateway"
   );
 }
 

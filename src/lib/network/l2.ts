@@ -197,10 +197,17 @@ export function l2Flood(
         device.type === "hub" ||
         device.type === "bridge" ||
         device.type === "repeater" ||
+        device.type === "coaxial_splitter" ||
         device.type === "access_point" ||
+        device.type === "ap_a" ||
+        device.type === "ap_ac" ||
         device.type === "ap_n" ||
+        device.type === "ap_3702i" ||
         device.type === "lap" ||
-        device.type === "cloud"
+        device.type === "meraki_ap" ||
+        device.type === "cloud" ||
+        device.type === "cloud_empty" ||
+        device.type === "cell_tower"
       ) {
         // Dumb flood — preserve VLAN if any
         if (isManagedSwitch(end.device.type)) {

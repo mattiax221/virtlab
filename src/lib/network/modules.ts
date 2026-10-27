@@ -1,6 +1,7 @@
 import { randomMac } from "./ip";
 import {
   DEVICE_META,
+  isAccessPoint,
   type DeviceKind,
   type InstalledModule,
   type InterfaceConfig,
@@ -181,11 +182,18 @@ export function deviceFamily(
     type === "pc" ||
     type === "laptop" ||
     type === "server" ||
+    type === "meraki_server" ||
+    type === "network_controller" ||
     type === "printer" ||
     type === "tablet" ||
     type === "smartphone" ||
     type === "tv" ||
-    type === "ip_phone"
+    type === "ip_phone" ||
+    type === "voip_device" ||
+    type === "generic_wired" ||
+    type === "generic_wireless" ||
+    type === "sniffer" ||
+    type === "cyber_observer"
   )
     return "host";
   if (
@@ -193,6 +201,7 @@ export function deviceFamily(
     type.startsWith("router_") ||
     type === "wireless_router" ||
     type === "home_router" ||
+    type === "home_gateway" ||
     type.startsWith("firewall_")
   )
     return "router";
@@ -205,9 +214,14 @@ export function deviceFamily(
     type === "repeater"
   )
     return "switch";
-  if (type === "access_point" || type === "ap_n" || type === "lap" || type === "wlc")
+  if (
+    isAccessPoint(type) ||
+    type === "wlc" ||
+    type === "wlc_2504" ||
+    type === "wlc_3504"
+  )
     return "ap";
-  if (type.startsWith("modem")) return "modem";
+  if (type.startsWith("modem") || type === "coaxial_splitter") return "modem";
   return "other";
 }
 
@@ -228,12 +242,16 @@ export function defaultModulesFor(
 ): InstalledModule[] {
   const fam = deviceFamily(type);
   if (fam === "host") {
-    if (type === "smartphone" || type === "tablet") {
+    if (type === "smartphone" || type === "tablet" || type === "generic_wireless") {
       return [{ id: uid("mod"), kind: "host_wifi", slot: 0 }];
     }
-    if (type === "analog_phone") return [];
-    // PC / laptop / server: Ethernet + Wi‑Fi (tray networks)
-    if (type === "pc" || type === "laptop" || type === "server") {
+    if (type === "analog_phone" || type === "voip_device") return [];
+    if (
+      type === "pc" ||
+      type === "laptop" ||
+      type === "server" ||
+      type === "meraki_server"
+    ) {
       return [
         { id: uid("mod"), kind: "host_fe", slot: 0 },
         { id: uid("mod"), kind: "host_wifi", slot: 1 },
@@ -242,8 +260,12 @@ export function defaultModulesFor(
     return [{ id: uid("mod"), kind: "host_fe", slot: 0 }];
   }
   if (fam === "router") {
-    if (type === "wireless_router" || type === "home_router") {
-      // LAN GE ports + dedicated Wi‑Fi radio
+    if (type === "router_empty") return [];
+    if (
+      type === "wireless_router" ||
+      type === "home_router" ||
+      type === "home_gateway"
+    ) {
       return [
         { id: uid("mod"), kind: "router_ge", slot: 0 },
         { id: uid("mod"), kind: "router_ge", slot: 1 },
@@ -252,13 +274,18 @@ export function defaultModulesFor(
       ];
     }
     const n =
-      type === "router_2911" || type === "router_4331"
+      type === "router_2911" ||
+      type === "router_4331" ||
+      type === "router_ir8340" ||
+      type.startsWith("firewall_")
         ? 3
-        : type.startsWith("firewall_")
-          ? 3
-          : 2;
+        : 2;
     const kind: ModuleKind =
-      type === "router_1841" || type === "router_2811" || type === "router"
+      type === "router_1841" ||
+      type === "router_2811" ||
+      type === "router_2620xm" ||
+      type === "router_2621xm" ||
+      type === "router"
         ? "router_fe"
         : "router_ge";
     return Array.from({ length: Math.min(n, 4) }, (_, i) => ({
@@ -268,6 +295,7 @@ export function defaultModulesFor(
     }));
   }
   if (fam === "switch") {
+    if (type === "switch_empty") return [];
     if (type === "hub" || type === "bridge" || type === "repeater") {
       const ports = type === "hub" ? 8 : 2;
       return Array.from({ length: ports }, (_, i) => ({
@@ -277,7 +305,11 @@ export function defaultModulesFor(
       }));
     }
     const metaPorts =
-      type === "switch_ie2000" ? 8 : type === "switch" || type === "multilayer_switch" ? 8 : 24;
+      type === "switch_ie2000" || type === "switch_ie3400"
+        ? 8
+        : type === "switch" || type === "multilayer_switch"
+          ? 8
+          : 24;
     return [
       { id: uid("mod"), kind: "switch_base", slot: 0 },
       ...(metaPorts >= 24
@@ -286,13 +318,30 @@ export function defaultModulesFor(
     ];
   }
   if (fam === "ap") {
+    if (type.startsWith("wlc")) {
+      return [
+        { id: uid("mod"), kind: "generic_eth", slot: 0 },
+        { id: uid("mod"), kind: "generic_eth", slot: 1 },
+      ];
+    }
     return [{ id: uid("mod"), kind: "ap_radio", slot: 0 }];
   }
   if (fam === "modem") {
+    if (type === "coaxial_splitter") {
+      return Array.from({ length: 3 }, (_, i) => ({
+        id: uid("mod"),
+        kind: "modem_wan" as const,
+        slot: i,
+      }));
+    }
     return [
       { id: uid("mod"), kind: "modem_eth", slot: 0 },
       { id: uid("mod"), kind: "modem_wan", slot: 1 },
     ];
+  }
+  if (type === "cloud_empty") return [];
+  if (type === "cell_tower") {
+    return [{ id: uid("mod"), kind: "generic_eth", slot: 0 }];
   }
   // cloud etc.
   return Array.from({ length: 4 }, (_, i) => ({

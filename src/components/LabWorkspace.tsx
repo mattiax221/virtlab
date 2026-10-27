@@ -12,16 +12,12 @@ import {
   nextDeviceName,
 } from "@/lib/network/engine";
 import { CABLE_META, PT_PALETTE, type CableKind } from "@/lib/network/catalog";
-import {
-  autosaveLab,
-  downloadLab,
-  loadAutosave,
-  parseLabJson,
-} from "@/lib/network/persist";
+import { autosaveLab, downloadLab, parseLabJson } from "@/lib/network/persist";
 import { buildPingSimulation, type SimPacket } from "@/lib/network/simulation";
 import {
   DEVICE_META,
   isEndHost,
+  isWifiCapable,
   type Device,
   type DeviceKind,
   type LabState,
@@ -51,8 +47,10 @@ const CATEGORY_LABELS: Record<string, string> = {
   "End Devices": "End",
   Switches: "Switch",
   Routers: "Router",
+  Hubs: "Hub",
   Wireless: "Wi‑Fi",
-  "Security / WAN": "WAN",
+  Security: "Sec",
+  "WAN Emulation": "WAN",
 };
 
 function modeFor(device: Device): OpenMode {
@@ -65,13 +63,7 @@ function modeFor(device: Device): OpenMode {
   ) {
     return "switch";
   }
-  if (
-    device.type === "access_point" ||
-    device.type === "ap_n" ||
-    device.type === "lap" ||
-    device.type === "wireless_router" ||
-    device.type === "home_router"
-  ) {
+  if (isWifiCapable(device.type)) {
     return "wifi";
   }
   if (
@@ -79,18 +71,24 @@ function modeFor(device: Device): OpenMode {
     device.type.startsWith("router_") ||
     device.type.startsWith("firewall_") ||
     device.type === "multilayer_switch" ||
-    device.type === "wlc"
+    device.type.startsWith("wlc")
   ) {
     return "router";
   }
-  if (device.type === "pc" || device.type === "laptop" || device.type === "server") {
+  if (
+    device.type === "pc" ||
+    device.type === "laptop" ||
+    device.type === "server" ||
+    device.type === "meraki_server"
+  ) {
     return "sim";
   }
   return "panel";
 }
 
 export function LabWorkspace() {
-  const [state, setState] = useState<LabState>(() => loadAutosave() ?? createDemoLab());
+  // Sempre canvas vuoto all’avvio (come PT nuovo file). Demo resta disponibile.
+  const [state, setState] = useState<LabState>(() => createEmptyLab());
   const stateRef = useRef(state);
   useEffect(() => {
     stateRef.current = state;
@@ -785,7 +783,7 @@ export function LabWorkspace() {
               onContextMenu={(e) =>
                 openContext(e, { kind: "palette", type })
               }
-              className="flex w-[4.75rem] shrink-0 flex-col items-center gap-1 rounded-md border border-transparent px-1 py-1.5 text-center text-[10px] text-slate-300 transition hover:border-slate-600 hover:bg-slate-800/70"
+              className="flex w-[4.6rem] shrink-0 flex-col items-center gap-1 rounded-md border border-slate-600/70 bg-slate-200/95 px-1 py-1.5 text-center text-[10px] font-medium text-slate-800 shadow-sm transition hover:border-sky-500 hover:bg-white"
             >
               <DeviceIcon type={type} className="h-9 w-9" />
               <span className="line-clamp-2 leading-tight">
