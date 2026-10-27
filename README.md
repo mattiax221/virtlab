@@ -16,11 +16,16 @@ Laboratorio stile **Cisco Packet Tracer** nel browser.
 - **Physical**: spegni il device → rimuovi/aggiungi moduli (Ethernet, Wi‑Fi, WIC, uplink)
 - **Wi‑Fi**: tray stile Windows, scan SSID dagli AP, WPA2
 - **DHCP / DNS / HTTP** sul Server-PT (`ipconfig /renew`, `ping server.lab`, `http www.lab`)
+- **DHCP automatico** quando colleghi il cavo Ethernet a un host senza IP
+- **ARP reale**: cache su host (`arp -a`) e router (`show arp`); si aggiorna con i ping
+- **Routing statico**: `ip route` / `show ip route` tra due router
 - **Salva / Carica** lab in JSON + autosave locale
-- **Simulation**: animazione hop-by-hop (ARP + ICMP)
+- **Condividi link** (`#lab=…`): topologia nell’URL, niente account/database
+- **Simulation**: ARP, ICMP, DHCP, DNS, HTTP (click destinazione Server)
+- Trascina i dispositivi dalla barra sotto sul canvas
 - **WAN Serial**: cavo Serial + `clock rate` sul DCE
 - **ACL** base Cisco-like (`access-list`, `ip access-group`)
-- Checklist esercizi in canvas
+- Esercizi guidati VLAN (access + trunk + router-on-a-stick)
 - Motore L2/L3 con flood VLAN-aware + learning MAC
 
 ## Avvio

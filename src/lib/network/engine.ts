@@ -1,8 +1,10 @@
 import { routerAllowsIcmp } from "./acl";
+import { learnArp } from "./arp";
 import { inferCable, type CableKind } from "./catalog";
 import { getDevice, getIface } from "./engine-helpers";
 import { formatIp, isValidIp, parseIp, parseMask, sameSubnet } from "./ip";
 import { l2Flood } from "./l2";
+import { requestDhcp } from "./services";
 import {
   availableModulesFor,
   defaultModulesFor,
@@ -16,6 +18,7 @@ import { resolveDnsName } from "./services";
 import {
   DEVICE_META,
   defaultVlans,
+  isEndHost,
   isL3Device,
   isManagedSwitch,
   isWifiCapable,
@@ -27,6 +30,7 @@ import {
   type Link,
   type PingHop,
   type PingResult,
+  type StaticRoute,
 } from "./types";
 
 export { getDevice, getIface };
@@ -496,27 +500,58 @@ export function connectDevices(
     media,
   };
 
-  const devices = state.devices.map((d) => {
-    if (d.id === a.id) {
-      return {
-        ...d,
-        interfaces: d.interfaces.map((i) =>
-          i.id === aIf.id ? { ...i, connectedLinkId: link.id } : i,
-        ),
-      };
-    }
-    if (d.id === b.id) {
-      return {
-        ...d,
-        interfaces: d.interfaces.map((i) =>
-          i.id === bIf.id ? { ...i, connectedLinkId: link.id } : i,
-        ),
-      };
-    }
-    return d;
-  });
+  let next: LabState = {
+    devices: state.devices.map((d) => {
+      if (d.id === a.id) {
+        return {
+          ...d,
+          interfaces: d.interfaces.map((i) =>
+            i.id === aIf.id ? { ...i, connectedLinkId: link.id } : i,
+          ),
+        };
+      }
+      if (d.id === b.id) {
+        return {
+          ...d,
+          interfaces: d.interfaces.map((i) =>
+            i.id === bIf.id ? { ...i, connectedLinkId: link.id } : i,
+          ),
+        };
+      }
+      return d;
+    }),
+    links: [...state.links, link],
+  };
 
-  return { state: { devices, links: [...state.links, link] } };
+  // DHCP renew automatico su host Ethernet collegati (LAN del nuovo cavo)
+  {
+    const flood = l2Flood(next, a.id);
+    next = flood.state;
+    const seen = new Set<string>();
+    const tryDhcp = (deviceId: string, ifaceId: string) => {
+      const key = `${deviceId}:${ifaceId}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      const d = getDevice(next, deviceId);
+      if (!d || !isEndHost(d.type)) return;
+      const iface = d.interfaces.find((i) => i.id === ifaceId);
+      if (!iface || !iface.connectedLinkId) return;
+      if (iface.media === "wireless" || iface.media === "serial") return;
+      if (iface.ip && !iface.dhcpClient) return;
+      const dhcp = requestDhcp(next, deviceId, ifaceId);
+      next = dhcp.state;
+    };
+    tryDhcp(a.id, aIf.id);
+    tryDhcp(b.id, bIf.id);
+    for (const d of next.devices) {
+      if (!isEndHost(d.type)) continue;
+      for (const i of d.interfaces) {
+        if (i.connectedLinkId) tryDhcp(d.id, i.id);
+      }
+    }
+  }
+
+  return { state: next };
 }
 
 export function deleteDevice(state: LabState, deviceId: string): LabState {
@@ -592,7 +627,16 @@ export function updateDevice(
   state: LabState,
   deviceId: string,
   patch: Partial<
-    Pick<Device, "name" | "vlans" | "macTable" | "accessLists" | "services">
+    Pick<
+      Device,
+      | "name"
+      | "vlans"
+      | "macTable"
+      | "accessLists"
+      | "services"
+      | "arpTable"
+      | "routes"
+    >
   >,
 ): LabState {
   return {
@@ -871,6 +915,20 @@ export function runPing(
       sourceMac: target.iface.mac,
     });
     nextState = back.state;
+    nextState = learnArp(
+      nextState,
+      from.id,
+      targetIp,
+      target.iface.mac,
+      srcIface.id,
+    );
+    nextState = learnArp(
+      nextState,
+      target.device.id,
+      fromIp,
+      srcIface.mac,
+      target.iface.id,
+    );
     hops.push({
       deviceId: target.device.id,
       deviceName: target.device.name,
@@ -917,6 +975,13 @@ export function runPing(
     deviceName: gw.device.name,
     ip: srcIface.gateway,
   });
+  nextState = learnArp(
+    nextState,
+    from.id,
+    srcIface.gateway,
+    gw.iface.mac,
+    srcIface.id,
+  );
 
   if (isL3Device(gw.device.type)) {
     const ingress =
@@ -925,9 +990,39 @@ export function runPing(
       gw.device.interfaces.find((i) => i.ip === srcIface.gateway) ??
       null;
     void findLocalRoute;
-    const routed = collectRouterDomains(nextState, gw.device);
+    let current = gw.device;
+    const routed = collectRouterDomains(nextState, current);
     nextState = routed.state;
-    const found = routed.hosts.find((e) => e.iface.ip === targetIp);
+    let found = routed.hosts.find((e) => e.iface.ip === targetIp) ?? null;
+
+    // Routing statico: ip route tra router (fino a 4 hop)
+    for (let i = 0; !found && i < 4; i++) {
+      const route = matchStaticRoute(current, targetIp);
+      if (!route) break;
+      const floodR = l2Flood(nextState, current.id, {
+        sourceMac: current.interfaces.find((x) => x.ip)?.mac,
+      });
+      nextState = floodR.state;
+      const nextHop = floodR.hosts.find((e) => e.iface.ip === route.nextHop);
+      if (!nextHop || !isL3Device(nextHop.device.type)) break;
+      nextState = learnArp(
+        nextState,
+        current.id,
+        route.nextHop,
+        nextHop.iface.mac,
+        current.interfaces.find((x) => x.ip)?.id ?? nextHop.iface.id,
+      );
+      hops.push({
+        deviceId: nextHop.device.id,
+        deviceName: nextHop.device.name,
+        ip: route.nextHop,
+      });
+      current = nextHop.device;
+      const more = collectRouterDomains(nextState, current);
+      nextState = more.state;
+      found = more.hosts.find((e) => e.iface.ip === targetIp) ?? null;
+    }
+
     if (!found) {
       return {
         state: nextState,
@@ -935,17 +1030,17 @@ export function runPing(
       };
     }
     const egress =
-      findLocalRoute(gw.device, targetIp) ??
-      gw.device.interfaces.find(
+      findLocalRoute(current, targetIp) ??
+      current.interfaces.find(
         (i) =>
           i.ip &&
           i.mask &&
-          found.iface.ip &&
-          sameSubnet(i.ip, found.iface.ip, i.mask),
+          found!.iface.ip &&
+          sameSubnet(i.ip, found!.iface.ip, i.mask),
       ) ??
       null;
     const acl = routerAllowsIcmp(
-      gw.device,
+      current,
       ingress,
       egress,
       fromIp,
@@ -963,6 +1058,13 @@ export function runPing(
         ),
       };
     }
+    nextState = learnArp(
+      nextState,
+      current.id,
+      targetIp,
+      found.iface.mac,
+      egress?.id ?? found.iface.id,
+    );
     hops.push({
       deviceId: found.device.id,
       deviceName: found.device.name,
@@ -987,6 +1089,28 @@ export function runPing(
     state: nextState,
     result: failPing(fromIp, targetIp, count, hops, "Richiesta scaduta."),
   };
+}
+
+function matchStaticRoute(
+  router: Device,
+  destIp: string,
+): StaticRoute | null {
+  const dest = parseIp(destIp);
+  if (dest === null) return null;
+  let best: StaticRoute | null = null;
+  let bestPrefix = -1;
+  for (const r of router.routes ?? []) {
+    const net = parseIp(r.network);
+    const mask = parseMask(r.mask);
+    if (net === null || mask === null) continue;
+    if ((dest & mask) >>> 0 !== (net & mask) >>> 0) continue;
+    const prefix = mask.toString(2).split("1").length - 1;
+    if (prefix > bestPrefix) {
+      bestPrefix = prefix;
+      best = r;
+    }
+  }
+  return best;
 }
 
 function failPing(

@@ -20,7 +20,16 @@ import {
 } from "@/lib/network/exportDiagram";
 import { autosaveLab, downloadLab, parseLabJson } from "@/lib/network/persist";
 import { shortPortName } from "@/lib/network/portSort";
-import { buildPingSimulation, type SimPacket } from "@/lib/network/simulation";
+import {
+  buildAutoSimulation,
+  buildDhcpSimulation,
+  type SimPacket,
+} from "@/lib/network/simulation";
+import {
+  buildShareUrl,
+  decodeLabFromHash,
+  readShareParamFromLocation,
+} from "@/lib/network/share";
 import {
   DEVICE_META,
   isEndHost,
@@ -112,6 +121,25 @@ export function LabWorkspace() {
     autosaveLab(state);
   }, [state]);
 
+  // Apri lab da URL (#lab=… o ?lab=…) — full open, niente account
+  useEffect(() => {
+    if (shareLoadedRef.current) return;
+    shareLoadedRef.current = true;
+    const param = readShareParamFromLocation();
+    if (!param) return;
+    void (async () => {
+      const decoded = await decodeLabFromHash(param);
+      if (decoded.state) {
+        setState(decoded.state);
+        setToast("Lab aperto dal link");
+        window.setTimeout(() => setToast(null), 2400);
+      } else if (decoded.error) {
+        setToast(decoded.error);
+        window.setTimeout(() => setToast(null), 3200);
+      }
+    })();
+  }, []);
+
   const [tool, setTool] = useState<Tool>("select");
   const [cableKind, setCableKind] = useState<CableKind>("auto");
   const [cableDraft, setCableDraft] = useState<CableDraft | null>(null);
@@ -122,6 +150,16 @@ export function LabWorkspace() {
   const [drag, setDrag] = useState<{ id: string; ox: number; oy: number } | null>(
     null,
   );
+  const [paletteDrag, setPaletteDrag] = useState<{
+    type: DeviceKind;
+    x: number;
+    y: number;
+    startX: number;
+    startY: number;
+  } | null>(null);
+  const paletteDragRef = useRef(paletteDrag);
+  paletteDragRef.current = paletteDrag;
+  const skipPaletteClickRef = useRef(false);
   const [ctx, setCtx] = useState<CtxState>(null);
   const [category, setCategory] = useState<string>(PT_PALETTE[0].title);
   const [filter, setFilter] = useState("");
@@ -131,8 +169,10 @@ export function LabWorkspace() {
   const [showExercises, setShowExercises] = useState(true);
   const [showExport, setShowExport] = useState(false);
   const [canUndo, setCanUndo] = useState(false);
+  const [shareBusy, setShareBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const historyRef = useRef<LabState[]>([]);
+  const shareLoadedRef = useRef(false);
 
   const canvasRef = useRef<HTMLDivElement>(null);
 
@@ -218,14 +258,18 @@ export function LabWorkspace() {
     showToast("Nuovo lab vuoto");
   }, [applyState, showToast]);
 
-  const addDevice = useCallback(
-    (type: DeviceKind) => {
+  const addDeviceAt = useCallback(
+    (type: DeviceKind, x?: number, y?: number) => {
       applyState((s) => {
         const name = nextDeviceName(s, type);
         const rect = canvasRef.current?.getBoundingClientRect();
-        const x = 120 + Math.random() * Math.max(200, (rect?.width ?? 600) - 240);
-        const y = 80 + Math.random() * Math.max(120, (rect?.height ?? 400) - 200);
-        const device = createDevice(type, name, x, y);
+        const px =
+          x ??
+          120 + Math.random() * Math.max(200, (rect?.width ?? 600) - 240);
+        const py =
+          y ??
+          80 + Math.random() * Math.max(120, (rect?.height ?? 400) - 200);
+        const device = createDevice(type, name, px, py);
         queueMicrotask(() => {
           setSelectedId(device.id);
           showToast(`Aggiunto ${name}`);
@@ -237,6 +281,29 @@ export function LabWorkspace() {
     },
     [applyState, showToast],
   );
+
+  const addDevice = useCallback(
+    (type: DeviceKind) => addDeviceAt(type),
+    [addDeviceAt],
+  );
+
+  const shareLab = useCallback(async () => {
+    setShareBusy(true);
+    try {
+      const url = await buildShareUrl(stateRef.current);
+      window.history.replaceState(null, "", url);
+      try {
+        await navigator.clipboard.writeText(url);
+        showToast("Link copiato — apri questo lab");
+      } catch {
+        showToast("Link aggiornato nella barra indirizzi");
+      }
+    } catch {
+      showToast("Condivisione fallita (lab troppo grande?)");
+    } finally {
+      setShareBusy(false);
+    }
+  }, [showToast]);
 
   const cancelCable = useCallback(() => {
     setCableDraft(null);
@@ -271,16 +338,22 @@ export function LabWorkspace() {
       if (!simFrom) {
         setSimFrom(device.id);
         setSelectedId(device.id);
-        showToast("Simulation: seleziona la destinazione");
+        showToast("Simulation: seleziona destinazione (ping/DHCP/DNS/HTTP)");
         return;
       }
-      if (simFrom === device.id) return;
-      const target =
-        state.devices.find((d) => d.id === device.id)?.interfaces.find((i) => i.ip)
-          ?.ip ?? device.name;
-      const built = buildPingSimulation(state, simFrom, target);
+      if (simFrom === device.id) {
+        // Stesso host → simula DHCP renew
+        const built = buildDhcpSimulation(state, simFrom);
+        applyState(built.state);
+        setSimPackets(built.packets.length ? built.packets : null);
+        showToast(built.message);
+        setSimFrom(null);
+        setTool("select");
+        return;
+      }
+      const built = buildAutoSimulation(state, simFrom, device.id);
       applyState(built.state);
-      setSimPackets(built.packets);
+      setSimPackets(built.packets.length ? built.packets : null);
       showToast(built.packets.length ? "Simulation avviata" : built.message);
       setSimFrom(null);
       setTool("select");
@@ -694,6 +767,12 @@ export function LabWorkspace() {
               </div>
             )}
           </div>
+          <ToolButton
+            onClick={() => void shareLab()}
+            title="Copia link con topologia (nessun account)"
+          >
+            {shareBusy ? "…" : "Condividi"}
+          </ToolButton>
           <ToolButton onClick={() => fileRef.current?.click()}>Carica</ToolButton>
           <input
             ref={fileRef}
@@ -733,8 +812,12 @@ export function LabWorkspace() {
           ref={canvasRef}
           className="lab-grid absolute inset-0 overflow-hidden"
           onPointerMove={onCanvasPointerMove}
-          onPointerUp={() => setDrag(null)}
-          onPointerLeave={() => setDrag(null)}
+          onPointerUp={() => {
+            setDrag(null);
+          }}
+          onPointerLeave={() => {
+            setDrag(null);
+          }}
           onClick={() => {
             setCtx(null);
             if (tool === "select") setSelectedId(null);
@@ -1022,12 +1105,74 @@ export function LabWorkspace() {
             <button
               key={type}
               type="button"
-              title={`${DEVICE_META[type].label} (${DEVICE_META[type].ptModel})`}
-              onClick={() => addDevice(type)}
+              title={`${DEVICE_META[type].label} — trascina sul canvas o clicca`}
+              onClick={() => {
+                if (skipPaletteClickRef.current) {
+                  skipPaletteClickRef.current = false;
+                  return;
+                }
+                addDevice(type);
+              }}
+              onPointerDown={(e) => {
+                if (e.button !== 0) return;
+                e.preventDefault();
+                const rect = canvasRef.current?.getBoundingClientRect();
+                const x = rect ? e.clientX - rect.left : e.clientX;
+                const y = rect ? e.clientY - rect.top : e.clientY;
+                const next = { type, x, y, startX: x, startY: y };
+                paletteDragRef.current = next;
+                setPaletteDrag(next);
+                (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+              }}
+              onPointerMove={(e) => {
+                const drag = paletteDragRef.current;
+                if (!drag || drag.type !== type) return;
+                const rect = canvasRef.current?.getBoundingClientRect();
+                if (!rect) return;
+                const next = {
+                  ...drag,
+                  x: e.clientX - rect.left,
+                  y: e.clientY - rect.top,
+                };
+                paletteDragRef.current = next;
+                setPaletteDrag(next);
+              }}
+              onPointerUp={(e) => {
+                const drag = paletteDragRef.current;
+                paletteDragRef.current = null;
+                setPaletteDrag(null);
+                try {
+                  (e.currentTarget as HTMLElement).releasePointerCapture(
+                    e.pointerId,
+                  );
+                } catch {
+                  /* ignore */
+                }
+                if (!drag || drag.type !== type) return;
+                const rect = canvasRef.current?.getBoundingClientRect();
+                const x = rect ? e.clientX - rect.left : drag.x;
+                const y = rect ? e.clientY - rect.top : drag.y;
+                const inCanvas =
+                  !!rect &&
+                  e.clientX >= rect.left &&
+                  e.clientX <= rect.right &&
+                  e.clientY >= rect.top &&
+                  e.clientY <= rect.bottom;
+                const moved =
+                  Math.hypot(x - drag.startX, y - drag.startY) > 14;
+                skipPaletteClickRef.current = true;
+                if (inCanvas && moved) {
+                  addDeviceAt(type, x, y);
+                } else if (!moved) {
+                  addDevice(type);
+                } else {
+                  skipPaletteClickRef.current = false;
+                }
+              }}
               onContextMenu={(e) =>
                 openContext(e, { kind: "palette", type })
               }
-              className="flex w-[4.6rem] shrink-0 flex-col items-center gap-1 rounded-md border border-slate-600/70 bg-slate-200/95 px-1 py-1.5 text-center text-[10px] font-medium text-slate-800 shadow-sm transition hover:border-sky-500 hover:bg-white"
+              className="flex w-[4.6rem] shrink-0 cursor-grab flex-col items-center gap-1 rounded-md border border-slate-600/70 bg-slate-200/95 px-1 py-1.5 text-center text-[10px] font-medium text-slate-800 shadow-sm transition hover:border-sky-500 hover:bg-white active:cursor-grabbing"
             >
               <DeviceIcon type={type} className="h-9 w-9" />
               <span className="line-clamp-2 leading-tight">
@@ -1037,6 +1182,27 @@ export function LabWorkspace() {
           ))}
         </div>
       </footer>
+
+      {paletteDrag && (
+        <div
+          className="pointer-events-none fixed z-[80] -translate-x-1/2 -translate-y-1/2 opacity-90"
+          style={{
+            left:
+              (canvasRef.current?.getBoundingClientRect().left ?? 0) +
+              paletteDrag.x,
+            top:
+              (canvasRef.current?.getBoundingClientRect().top ?? 0) +
+              paletteDrag.y,
+          }}
+        >
+          <div className="flex flex-col items-center rounded-md border border-sky-400 bg-slate-200/95 px-2 py-1 shadow-xl">
+            <DeviceIcon type={paletteDrag.type} className="h-10 w-10" />
+            <span className="text-[10px] font-medium text-slate-800">
+              {DEVICE_META[paletteDrag.type].label}
+            </span>
+          </div>
+        </div>
+      )}
 
       {ctx && menuItems.length > 0 && (
         <ContextMenu

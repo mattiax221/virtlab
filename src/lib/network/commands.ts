@@ -1,3 +1,4 @@
+import { formatArpTable, learnArp } from "./arp";
 import {
   createSubinterface,
   getDevice,
@@ -14,7 +15,7 @@ import {
   l2Flood,
 } from "./l2";
 import { fetchHttp, requestDhcp } from "./services";
-import type { CommandResult, LabState, VlanRecord } from "./types";
+import type { CommandResult, LabState, StaticRoute, VlanRecord } from "./types";
 
 export type CommandContext = {
   state: LabState;
@@ -32,7 +33,7 @@ function helpPc(): string {
     "  ipconfig /renew          Richiede IP via DHCP",
     "  ping <indirizzo|nome>    ICMP (anche nomi DNS tipo server.lab)",
     "  http <host>              GET HTTP su Server-PT",
-    "  arp -a                   Cache ARP",
+    "  arp -a                   Cache ARP reale (imparata dai ping)",
     "  route print              Tabella di routing",
     "  hostname                 Nome del PC",
     "  cls / clear              Pulisce lo schermo",
@@ -61,6 +62,10 @@ function helpRouter(): string {
     "  access-list <n> permit|deny ip|icmp <src> <dst>",
     "  ip access-group <n> in|out",
     "  show access-lists",
+    "  show arp / show ip arp    Tabella ARP",
+    "  show ip route             Rotte connesse + statiche",
+    "  ip route <rete> <mask> <next-hop>",
+    "  no ip route <rete> <mask> [next-hop]",
     "  exit",
     "  ping <indirizzo>",
     "  hostname <nome>",
@@ -73,6 +78,9 @@ function helpRouter(): string {
     "  ip address 192.168.10.1 255.255.255.0",
     "  no shutdown",
     "  (ripeti per .20) — sullo switch: porta verso router in trunk",
+    "",
+    "Routing statico tra due router:",
+    "  ip route 192.168.2.0 255.255.255.0 10.0.0.2",
     "",
     "WAN seriale: Physical → Serial WIC → cavo Serial → clock rate sul DCE",
     "ACL: access-list 100 deny icmp any host 192.168.1.100",
@@ -176,25 +184,48 @@ function setIp(
 
 function arpTable(ctx: CommandContext): string {
   const device = getDevice(ctx.state, ctx.deviceId);
-  const my = device?.interfaces[0];
+  if (!device) return "Dispositivo non trovato.";
+  const cached = device.arpTable ?? [];
+  if (cached.length > 0) {
+    const lines = [
+      "",
+      "Interfaccia: Ethernet0 --- 0xffffffff",
+      "  Indirizzo Internet      Indirizzo fisico      Tipo",
+    ];
+    for (const e of cached) {
+      lines.push(
+        `  ${e.ip.padEnd(22)} ${e.mac.padEnd(20)} ${e.type === "static" ? "statico" : "dinamico"}`,
+      );
+    }
+    return lines.join("\n");
+  }
+  // Prima consultazione: scopri i vicini L2 e popola la cache
+  const my = device.interfaces.find((i) => i.ip && i.mask);
   if (!my?.ip || !my.mask) {
     return "Nessuna voce ARP (configura prima un IP).";
   }
   const flood = l2Flood(ctx.state, ctx.deviceId, { sourceMac: my.mac });
-  ctx.setState(flood.state);
+  let next = flood.state;
+  for (const n of flood.hosts) {
+    if (n.device.id === ctx.deviceId || !n.iface.ip) continue;
+    next = learnArp(next, ctx.deviceId, n.iface.ip, n.iface.mac, my.id);
+  }
+  ctx.setState(next);
+  const updated = getDevice(next, ctx.deviceId);
+  if (!updated) return "Dispositivo non trovato.";
+  const rows = updated.arpTable ?? [];
   const lines = [
     "",
     "Interfaccia: Ethernet0 --- 0xffffffff",
     "  Indirizzo Internet      Indirizzo fisico      Tipo",
   ];
-  const others = flood.hosts.filter(
-    (n) => n.device.id !== ctx.deviceId && n.iface.ip,
-  );
-  for (const n of others) {
-    lines.push(`  ${(n.iface.ip ?? "").padEnd(22)} ${n.iface.mac.padEnd(20)} dinamico`);
+  for (const e of rows) {
+    lines.push(
+      `  ${e.ip.padEnd(22)} ${e.mac.padEnd(20)} ${e.type === "static" ? "statico" : "dinamico"}`,
+    );
   }
-  if (others.length === 0) {
-    lines.push("  (vuota — collega i cavi / stessa VLAN)");
+  if (rows.length === 0) {
+    lines.push("  (vuota — collega i cavi / stessa VLAN, poi ping)");
   }
   return lines.join("\n");
 }
@@ -878,6 +909,104 @@ export function runRouterCommand(
         .join("\n");
     });
     return { output: blocks.join("\n") };
+  }
+
+  if (
+    (lower === "show arp" ||
+      lower === "show ip arp" ||
+      lower === "sh arp" ||
+      lower === "sh ip arp") &&
+    (cli.mode === "enable" || cli.mode === "user")
+  ) {
+    const cached = device.arpTable ?? [];
+    if (cached.length === 0) {
+      // Popola da vicini L2 (come arp -a su PC)
+      const my = device.interfaces.find((i) => i.ip);
+      if (my) {
+        const flood = l2Flood(ctx.state, ctx.deviceId, { sourceMac: my.mac });
+        let next = flood.state;
+        for (const n of flood.hosts) {
+          if (n.device.id === ctx.deviceId || !n.iface.ip) continue;
+          next = learnArp(next, ctx.deviceId, n.iface.ip, n.iface.mac, my.id);
+        }
+        ctx.setState(next);
+        const updated = getDevice(next, ctx.deviceId);
+        return { output: formatArpTable(updated ?? device) };
+      }
+    }
+    return { output: formatArpTable(device) };
+  }
+
+  if (
+    (lower === "show ip route" || lower === "sh ip route") &&
+    (cli.mode === "enable" || cli.mode === "user")
+  ) {
+    const lines = [
+      "Codes: C - connected, S - static, * - candidate default",
+      "",
+    ];
+    for (const iface of device.interfaces) {
+      if (!iface.ip || !iface.mask) continue;
+      const ipn = parseIp(iface.ip);
+      const maskn = parseMask(iface.mask);
+      if (ipn === null || maskn === null) continue;
+      const net = formatIp((ipn & maskn) >>> 0);
+      const cidr = maskToCidr(iface.mask) ?? 24;
+      lines.push(`C    ${net}/${cidr} is directly connected, ${iface.name}`);
+    }
+    for (const r of device.routes ?? []) {
+      const cidr = maskToCidr(r.mask) ?? 24;
+      lines.push(
+        `S    ${r.network}/${cidr} [1/0] via ${r.nextHop}${r.outIface ? `, ${r.outIface}` : ""}`,
+      );
+    }
+    if (lines.length <= 2) lines.push("  (nessuna rotta)");
+    return { output: lines.join("\n") };
+  }
+
+  if (
+    lower.startsWith("ip route ") &&
+    (cli.mode === "config" || cli.mode === "enable")
+  ) {
+    const network = parts[2];
+    const mask = parts[3];
+    const nextHop = parts[4];
+    if (!network || !mask || !nextHop) {
+      return { output: "% Uso: ip route <rete> <mask> <next-hop>" };
+    }
+    if (
+      !isValidIp(network) ||
+      parseMask(mask) === null ||
+      !isValidIp(nextHop)
+    ) {
+      return { output: "% Invalid network, mask or next-hop" };
+    }
+    const route: StaticRoute = { network, mask, nextHop };
+    const routes = [...(device.routes ?? [])].filter(
+      (r) => !(r.network === network && r.mask === mask && r.nextHop === nextHop),
+    );
+    routes.push(route);
+    ctx.setState(updateDevice(ctx.state, ctx.deviceId, { routes }));
+    return { output: "" };
+  }
+
+  if (
+    lower.startsWith("no ip route ") &&
+    (cli.mode === "config" || cli.mode === "enable")
+  ) {
+    const network = parts[3];
+    const mask = parts[4];
+    const nextHop = parts[5];
+    if (!network || !mask) {
+      return { output: "% Uso: no ip route <rete> <mask> [next-hop]" };
+    }
+    const routes = (device.routes ?? []).filter((r) => {
+      if (r.network !== network || r.mask !== mask) return true;
+      if (nextHop && r.nextHop !== nextHop) return true;
+      return false;
+    });
+    ctx.setState(updateDevice(ctx.state, ctx.deviceId, { routes }));
+    return { output: "" };
   }
 
   if (lower.startsWith("ping ") && (cli.mode === "enable" || cli.mode === "user")) {

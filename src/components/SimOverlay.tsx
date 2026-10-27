@@ -61,9 +61,15 @@ export function SimOverlay({
   const color =
     packet.kind === "ARP"
       ? "#fbbf24"
-      : packet.ok
-        ? "#34d399"
-        : "#f87171";
+      : packet.kind === "DHCP"
+        ? "#38bdf8"
+        : packet.kind === "DNS"
+          ? "#a78bfa"
+          : packet.kind === "HTTP"
+            ? "#fb923c"
+            : packet.ok
+              ? "#34d399"
+              : "#f87171";
 
   return (
     <div className="pointer-events-none absolute inset-0 z-20">

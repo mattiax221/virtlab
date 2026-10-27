@@ -145,6 +145,22 @@ export type MacEntry = {
   type: "dynamic" | "static";
 };
 
+export type ArpEntry = {
+  ip: string;
+  mac: string;
+  ifaceId: string;
+  type: "dynamic" | "static";
+  ageSec?: number;
+};
+
+export type StaticRoute = {
+  network: string;
+  mask: string;
+  nextHop: string;
+  /** Optional outbound interface name */
+  outIface?: string | null;
+};
+
 export type InstalledModule = {
   id: string;
   kind: string;
@@ -187,6 +203,10 @@ export type Device = {
   services?: DeviceServices;
   /** Numbered ACLs on routers / firewalls */
   accessLists?: AccessList[];
+  /** Host / router ARP cache */
+  arpTable?: ArpEntry[];
+  /** Router static routes (ip route) */
+  routes?: StaticRoute[];
 };
 
 export type DhcpLease = {
