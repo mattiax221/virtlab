@@ -25,7 +25,7 @@ Apri [http://127.0.0.1:43127](http://127.0.0.1:43127).
 
 ## Percorso consigliato
 
-1. Clicca **Apri il laboratorio** (c’è già una demo LAN).
+1. Dalla home clicca **Apri il laboratorio** (oppure apri `/lab` — c’è già una demo LAN).
 2. Doppio clic su **PC0** → digita `ipconfig`, poi `ping 192.168.1.20`.
 3. Prova a scollegare un cavo (strumento Elimina sul cavo) e ripeti il ping.
 4. Sul router: doppio clic → `enable` → `show ip interface brief`.
