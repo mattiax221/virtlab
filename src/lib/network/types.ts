@@ -47,6 +47,8 @@ export type DeviceKind =
 
 export type DeviceType = DeviceKind;
 
+export type PortMode = "access" | "trunk";
+
 export type InterfaceConfig = {
   id: string;
   name: string;
@@ -56,6 +58,24 @@ export type InterfaceConfig = {
   mac: string;
   connectedLinkId: string | null;
   enabled: boolean;
+  /** L2 (switch ports) */
+  mode: PortMode;
+  accessVlan: number;
+  nativeVlan: number;
+  /** trunk: 'all' or explicit list */
+  allowedVlans: number[] | "all";
+};
+
+export type VlanRecord = {
+  id: number;
+  name: string;
+};
+
+export type MacEntry = {
+  mac: string;
+  vlan: number;
+  portId: string;
+  type: "dynamic" | "static";
 };
 
 export type Device = {
@@ -66,6 +86,10 @@ export type Device = {
   y: number;
   interfaces: InterfaceConfig[];
   osSlot?: string;
+  /** Defined VLANs on managed switches (VLAN 1 always exists) */
+  vlans?: VlanRecord[];
+  /** Learned / static MAC address table */
+  macTable?: MacEntry[];
 };
 
 export type Link = {
@@ -164,18 +188,37 @@ export const DEVICE_META: Record<DeviceKind, Meta> = {
   co_server: { label: "Central Office", category: "wan", ports: 2, hasOs: false, ptModel: "Central-Office-Server" },
 };
 
+/** Managed Cisco-like switch (VLAN / MAC table / switchport) */
+export function isManagedSwitch(type: DeviceKind): boolean {
+  return (
+    type === "switch" ||
+    type.startsWith("switch_") ||
+    type === "multilayer_switch"
+  );
+}
+
+/** Floods frames at L2 (hubs, switches, AP, cloud…) */
 export function isL2Bridge(type: DeviceKind): boolean {
   return (
     type === "hub" ||
     type === "bridge" ||
     type === "repeater" ||
-    type === "switch" ||
-    type.startsWith("switch_") ||
+    isManagedSwitch(type) ||
     type === "access_point" ||
     type === "ap_n" ||
     type === "lap" ||
     type === "cloud"
   );
+}
+
+export function defaultVlans(): VlanRecord[] {
+  return [
+    { id: 1, name: "default" },
+    { id: 1002, name: "fddi-default" },
+    { id: 1003, name: "token-ring-default" },
+    { id: 1004, name: "fddinet-default" },
+    { id: 1005, name: "trnet-default" },
+  ];
 }
 
 export function isL3Device(type: DeviceKind): boolean {

@@ -1,10 +1,18 @@
 import {
   getDevice,
   runPing,
+  updateDevice,
   updateIface,
 } from "./engine";
-import { formatIp, isValidIp, maskToCidr, parseIp, parseMask, sameSubnet } from "./ip";
-import type { CommandResult, LabState } from "./types";
+import { formatIp, isValidIp, maskToCidr, parseIp, parseMask } from "./ip";
+import {
+  formatInterfacesStatus,
+  formatInterfacesTrunk,
+  formatMacTable,
+  formatVlanBrief,
+  l2Flood,
+} from "./l2";
+import type { CommandResult, LabState, VlanRecord } from "./types";
 
 export type CommandContext = {
   state: LabState;
@@ -122,58 +130,27 @@ function setIp(
   ].join("\n");
 }
 
-function l2Neighbors(
-  state: LabState,
-  deviceId: string,
-): { deviceId: string; ip: string; mac: string }[] {
-  const device = getDevice(state, deviceId);
+function arpTable(ctx: CommandContext): string {
+  const device = getDevice(ctx.state, ctx.deviceId);
   const my = device?.interfaces[0];
-  const result: { deviceId: string; ip: string; mac: string }[] = [];
-  if (!my?.ip || !my.mask) return result;
-
-  const visited = new Set<string>();
-  const queue = [deviceId];
-  while (queue.length) {
-    const id = queue.shift()!;
-    if (visited.has(id)) continue;
-    visited.add(id);
-    const d = getDevice(state, id);
-    if (!d) continue;
-    if (d.type !== "switch") {
-      for (const iface of d.interfaces) {
-        if (iface.ip && sameSubnet(my.ip, iface.ip, my.mask)) {
-          result.push({ deviceId: d.id, ip: iface.ip, mac: iface.mac });
-        }
-      }
-    }
-    for (const iface of d.interfaces) {
-      if (!iface.connectedLinkId) continue;
-      const link = state.links.find((l) => l.id === iface.connectedLinkId);
-      if (!link) continue;
-      const other = link.aDeviceId === id ? link.bDeviceId : link.aDeviceId;
-      if (!visited.has(other)) queue.push(other);
-    }
-  }
-  return result;
-}
-
-function arpTable(state: LabState, deviceId: string): string {
-  const device = getDevice(state, deviceId);
-  if (!device?.interfaces[0]?.ip) {
+  if (!my?.ip || !my.mask) {
     return "Nessuna voce ARP (configura prima un IP).";
   }
-  const neighbors = l2Neighbors(state, deviceId);
+  const flood = l2Flood(ctx.state, ctx.deviceId, { sourceMac: my.mac });
+  ctx.setState(flood.state);
   const lines = [
     "",
     "Interfaccia: Ethernet0 --- 0xffffffff",
     "  Indirizzo Internet      Indirizzo fisico      Tipo",
   ];
-  const others = neighbors.filter((n) => n.deviceId !== deviceId);
+  const others = flood.hosts.filter(
+    (n) => n.device.id !== ctx.deviceId && n.iface.ip,
+  );
   for (const n of others) {
-    lines.push(`  ${n.ip.padEnd(22)} ${n.mac.padEnd(20)} dinamico`);
+    lines.push(`  ${(n.iface.ip ?? "").padEnd(22)} ${n.iface.mac.padEnd(20)} dinamico`);
   }
   if (others.length === 0) {
-    lines.push("  (vuota — collega i cavi e configura gli IP)");
+    lines.push("  (vuota — collega i cavi / stessa VLAN)");
   }
   return lines.join("\n");
 }
@@ -249,12 +226,13 @@ export function runPcCommand(
   if (lower.startsWith("ping ")) {
     const target = parts[1];
     if (!target) return { output: "Uso: ping <indirizzo>" };
-    const result = runPing(ctx.state, ctx.deviceId, target);
+    const { result, state } = runPing(ctx.state, ctx.deviceId, target);
+    ctx.setState(state);
     return { output: result.message };
   }
 
   if (lower === "arp -a" || lower === "arp") {
-    return { output: arpTable(ctx.state, ctx.deviceId) };
+    return { output: arpTable(ctx) };
   }
 
   if (lower === "route print" || lower === "route") {
@@ -266,23 +244,69 @@ export function runPcCommand(
   };
 }
 
-export type RouterCliMode = "user" | "enable" | "config" | "config-if";
+export type RouterCliMode =
+  | "user"
+  | "enable"
+  | "config"
+  | "config-if"
+  | "config-vlan";
 
 export type RouterCliState = {
   mode: RouterCliMode;
   ifaceId: string | null;
+  vlanId: number | null;
   hostname: string;
 };
 
 export function initialRouterCli(hostname: string): RouterCliState {
-  return { mode: "user", ifaceId: null, hostname };
+  return { mode: "user", ifaceId: null, vlanId: null, hostname };
 }
 
 export function routerPrompt(cli: RouterCliState): string {
   if (cli.mode === "user") return `${cli.hostname}>`;
   if (cli.mode === "enable") return `${cli.hostname}#`;
   if (cli.mode === "config") return `${cli.hostname}(config)#`;
+  if (cli.mode === "config-vlan") return `${cli.hostname}(config-vlan)#`;
   return `${cli.hostname}(config-if)#`;
+}
+
+function helpSwitch(): string {
+  return [
+    "Comandi switch L2 (stile Cisco IOS):",
+    "  enable",
+    "  show vlan brief",
+    "  show mac address-table",
+    "  show interfaces status",
+    "  show interfaces trunk",
+    "  show ip interface brief",
+    "  configure terminal",
+    "  vlan <id>",
+    "  name <nome>                 (in config-vlan)",
+    "  interface FastEthernet0/1",
+    "  switchport mode access|trunk",
+    "  switchport access vlan <id>",
+    "  switchport trunk native vlan <id>",
+    "  switchport trunk allowed vlan all|<lista>",
+    "  no shutdown / shutdown",
+    "  exit / end",
+    "  help",
+    "",
+    "Esempio VLAN:",
+    "  enable → conf t → vlan 10 → name SALES → exit",
+    "  interface Fa0/1 → switchport mode access → switchport access vlan 10",
+  ].join("\n");
+}
+
+function findIfaceByName(device: NonNullable<ReturnType<typeof getDevice>>, name: string) {
+  const n = name.toLowerCase().replace(/\s+/g, "");
+  return device.interfaces.find((i) => {
+    const full = i.name.toLowerCase().replace(/\s+/g, "");
+    const short = full
+      .replace("fastethernet", "fa")
+      .replace("gigabitethernet", "gi")
+      .replace("ethernet", "et");
+    return full === n || short === n || full.endsWith(n);
+  });
 }
 
 export function runRouterCommand(
@@ -298,7 +322,9 @@ export function runRouterCommand(
   const device = getDevice(ctx.state, ctx.deviceId);
   if (!device) return { output: "Dispositivo non trovato." };
 
-  if (lower === "help" || lower === "?") return { output: helpRouter() };
+  if (lower === "help" || lower === "?") {
+    return { output: helpRouter() + "\n\n--- Switch L2 ---\n" + helpSwitch() };
+  }
   if (lower === "cls" || lower === "clear") return { output: "", clear: true };
 
   if (lower === "enable") {
@@ -322,6 +348,10 @@ export function runRouterCommand(
   if (lower === "exit" || lower === "end") {
     if (cli.mode === "config-if") {
       setCli({ ...cli, mode: "config", ifaceId: null });
+      return { output: "" };
+    }
+    if (cli.mode === "config-vlan") {
+      setCli({ ...cli, mode: "config", vlanId: null });
       return { output: "" };
     }
     if (cli.mode === "config") {
@@ -350,16 +380,160 @@ export function runRouterCommand(
 
   if (lower.startsWith("interface ") && cli.mode === "config") {
     const name = parts.slice(1).join(" ");
-    const iface = device.interfaces.find(
-      (i) => i.name.toLowerCase() === name.toLowerCase(),
-    );
+    const iface = findIfaceByName(device, name);
     if (!iface) {
       return {
-        output: `% Invalid input detected\nInterfacce: ${device.interfaces.map((i) => i.name).join(", ")}`,
+        output: `% Invalid input detected\nInterfacce: ${device.interfaces
+          .slice(0, 8)
+          .map((i) => i.name)
+          .join(", ")}…`,
       };
     }
-    setCli({ ...cli, mode: "config-if", ifaceId: iface.id });
+    setCli({ ...cli, mode: "config-if", ifaceId: iface.id, vlanId: null });
     return { output: "" };
+  }
+
+  // ---- VLAN / switchport (L2) ----
+  if (lower.startsWith("vlan ") && cli.mode === "config") {
+    const id = Number(parts[1]);
+    if (!Number.isInteger(id) || id < 1 || id > 4094) {
+      return { output: "% Invalid VLAN id (1-4094)" };
+    }
+    const vlans: VlanRecord[] = [...(device.vlans ?? [{ id: 1, name: "default" }])];
+    if (!vlans.some((v) => v.id === id)) {
+      vlans.push({ id, name: `VLAN${id}` });
+      vlans.sort((a, b) => a.id - b.id);
+      ctx.setState(updateDevice(ctx.state, ctx.deviceId, { vlans }));
+    }
+    setCli({ ...cli, mode: "config-vlan", vlanId: id, ifaceId: null });
+    return { output: "" };
+  }
+
+  if (lower.startsWith("name ") && cli.mode === "config-vlan" && cli.vlanId != null) {
+    const name = parts.slice(1).join(" ") || `VLAN${cli.vlanId}`;
+    const vlans = [...(device.vlans ?? [{ id: 1, name: "default" }])];
+    const idx = vlans.findIndex((v) => v.id === cli.vlanId);
+    if (idx >= 0) vlans[idx] = { ...vlans[idx], name };
+    else vlans.push({ id: cli.vlanId, name });
+    ctx.setState(updateDevice(ctx.state, ctx.deviceId, { vlans }));
+    return { output: "" };
+  }
+
+  if (
+    (lower === "switchport mode access" || lower === "switchport mode trunk") &&
+    cli.mode === "config-if" &&
+    cli.ifaceId
+  ) {
+    const mode = lower.endsWith("trunk") ? "trunk" : "access";
+    ctx.setState(
+      updateIface(ctx.state, ctx.deviceId, cli.ifaceId, { mode }),
+    );
+    return { output: "" };
+  }
+
+  if (
+    lower.startsWith("switchport access vlan ") &&
+    cli.mode === "config-if" &&
+    cli.ifaceId
+  ) {
+    const id = Number(parts[3]);
+    if (!Number.isInteger(id) || id < 1 || id > 4094) {
+      return { output: "% Invalid VLAN id" };
+    }
+    let next = updateIface(ctx.state, ctx.deviceId, cli.ifaceId, {
+      mode: "access",
+      accessVlan: id,
+    });
+    const d = getDevice(next, ctx.deviceId)!;
+    const vlans = [...(d.vlans ?? [{ id: 1, name: "default" }])];
+    if (!vlans.some((v) => v.id === id)) {
+      vlans.push({ id, name: `VLAN${id}` });
+      vlans.sort((a, b) => a.id - b.id);
+      next = updateDevice(next, ctx.deviceId, { vlans });
+    }
+    ctx.setState(next);
+    return { output: "" };
+  }
+
+  if (
+    lower.startsWith("switchport trunk native vlan ") &&
+    cli.mode === "config-if" &&
+    cli.ifaceId
+  ) {
+    const id = Number(parts[4]);
+    if (!Number.isInteger(id) || id < 1 || id > 4094) {
+      return { output: "% Invalid VLAN id" };
+    }
+    ctx.setState(
+      updateIface(ctx.state, ctx.deviceId, cli.ifaceId, {
+        mode: "trunk",
+        nativeVlan: id,
+      }),
+    );
+    return { output: "" };
+  }
+
+  if (
+    lower.startsWith("switchport trunk allowed vlan ") &&
+    cli.mode === "config-if" &&
+    cli.ifaceId
+  ) {
+    const rest = parts.slice(4).join("").toLowerCase();
+    if (rest === "all") {
+      ctx.setState(
+        updateIface(ctx.state, ctx.deviceId, cli.ifaceId, {
+          mode: "trunk",
+          allowedVlans: "all",
+        }),
+      );
+      return { output: "" };
+    }
+    const ids = rest
+      .split(",")
+      .map((x) => Number(x.trim()))
+      .filter((n) => Number.isInteger(n) && n >= 1 && n <= 4094);
+    if (ids.length === 0) return { output: "% Incomplete command." };
+    ctx.setState(
+      updateIface(ctx.state, ctx.deviceId, cli.ifaceId, {
+        mode: "trunk",
+        allowedVlans: ids,
+      }),
+    );
+    return { output: "" };
+  }
+
+  if (
+    (lower === "show vlan brief" ||
+      lower === "show vlan" ||
+      lower === "sh vlan brief" ||
+      lower === "sh vlan") &&
+    (cli.mode === "enable" || cli.mode === "user")
+  ) {
+    return { output: formatVlanBrief(device) };
+  }
+
+  if (
+    (lower === "show mac address-table" ||
+      lower === "show mac-address-table" ||
+      lower === "sh mac address-table" ||
+      lower === "show mac") &&
+    (cli.mode === "enable" || cli.mode === "user")
+  ) {
+    return { output: formatMacTable(device) };
+  }
+
+  if (
+    (lower === "show interfaces status" || lower === "show int status") &&
+    (cli.mode === "enable" || cli.mode === "user")
+  ) {
+    return { output: formatInterfacesStatus(device) };
+  }
+
+  if (
+    (lower === "show interfaces trunk" || lower === "show int trunk") &&
+    (cli.mode === "enable" || cli.mode === "user")
+  ) {
+    return { output: formatInterfacesTrunk(device) };
   }
 
   if (lower.startsWith("ip address ") && cli.mode === "config-if" && cli.ifaceId) {
@@ -427,7 +601,8 @@ export function runRouterCommand(
   if (lower.startsWith("ping ") && (cli.mode === "enable" || cli.mode === "user")) {
     const target = parts[1];
     if (!target) return { output: "% Incomplete command." };
-    const result = runPing(ctx.state, ctx.deviceId, target);
+    const { result, state } = runPing(ctx.state, ctx.deviceId, target);
+    ctx.setState(state);
     if (result.ok) {
       return {
         output: [
@@ -450,4 +625,16 @@ export function runRouterCommand(
   }
 
   return { output: `% Unknown command / incomplete command: "${line}"\nDigita help` };
+}
+
+/** Alias: same CLI engine, switch-oriented welcome/help */
+export function runSwitchCommand(
+  raw: string,
+  ctx: CommandContext,
+  cli: RouterCliState,
+  setCli: (next: RouterCliState) => void,
+): CommandResult {
+  const lower = raw.trim().toLowerCase();
+  if (lower === "help" || lower === "?") return { output: helpSwitch() };
+  return runRouterCommand(raw, ctx, cli, setCli);
 }

@@ -10,7 +10,9 @@ Laboratorio stile **Cisco Packet Tracer** nel browser.
   `Pannello di controllo \ Rete e Internet \ Connessioni di rete`
   → Proprietà adattatore → TCP/IPv4 (IP statico come in Windows)
 - Prompt dei comandi: `ipconfig`, `ping`, …
-- Motore L2/L3 semplificato
+- **L2 switch (Cisco-like)**: LED porte, VLAN access/trunk, `show vlan brief`,
+  `show mac address-table`, `show interfaces status`, isolamento tra VLAN
+- Motore L2/L3 con flood VLAN-aware + learning MAC
 
 ## Avvio
 

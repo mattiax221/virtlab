@@ -696,7 +696,12 @@ export function LabWorkspace() {
         />
       )}
       {openDevice && openMode === "switch" && (
-        <SwitchPanel device={openDevice} onClose={closeOpen} />
+        <SwitchPanel
+          device={openDevice}
+          stateRef={stateRef}
+          setState={setState}
+          onClose={closeOpen}
+        />
       )}
       {openDevice && openMode === "panel" && (
         <SimpleDevicePanel device={openDevice} onClose={closeOpen} />

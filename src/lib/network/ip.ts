@@ -67,14 +67,21 @@ export function isValidIp(ip: string): boolean {
 }
 
 export function randomMac(seed: string): string {
-  let hash = 0;
+  // FNV-1a 32-bit — stable, well-spread for short seeds (deviceId-ifName)
+  let hash = 0x811c9dc5;
   for (let i = 0; i < seed.length; i++) {
-    hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
+    hash ^= seed.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
   }
-  const bytes = [0x02]; // locally administered
+  // Mix further so consecutive seeds diverge in all octets
+  let x = hash ^ (seed.length * 0x9e3779b9);
+  const bytes = [0x02]; // locally administered, unicast
   for (let i = 0; i < 5; i++) {
-    hash = (hash * 1103515245 + 12345) >>> 0;
-    bytes.push(hash & 0xff);
+    x = Math.imul(x ^ (x >>> 16), 0x7feb352d) >>> 0;
+    x = Math.imul(x ^ (x >>> 15), 0x846ca68b) >>> 0;
+    x ^= x >>> 16;
+    bytes.push(x & 0xff);
+    x = (x + 0x9e3779b9 + hash) >>> 0;
   }
   return bytes.map((b) => b.toString(16).padStart(2, "0")).join(":");
 }
