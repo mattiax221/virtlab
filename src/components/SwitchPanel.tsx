@@ -27,8 +27,8 @@ export function SwitchPanel({
             Chiudi
           </button>
         </div>
-        <div className="space-y-2 p-4">
-          {device.interfaces.map((iface) => (
+        <div className="max-h-[50vh] space-y-2 overflow-y-auto p-4">
+          {device.interfaces.slice(0, 12).map((iface) => (
             <div
               key={iface.id}
               className="flex items-center justify-between rounded border border-slate-700/80 bg-slate-950/50 px-3 py-2 text-sm"
@@ -43,9 +43,14 @@ export function SwitchPanel({
               </span>
             </div>
           ))}
+          {device.interfaces.length > 12 && (
+            <p className="text-xs text-slate-500">
+              … e altre {device.interfaces.length - 12} porte
+            </p>
+          )}
           <p className="pt-2 text-xs leading-relaxed text-slate-500">
-            Uno switch non usa IP per inoltrare traffico locale. Collega i PC e
-            configura gli indirizzi dal desktop Windows di ogni host.
+            Modello stile Packet Tracer. L2: inoltra frame tra porte up. IP
+            statico sui PC dal desktop simulato.
           </p>
         </div>
       </div>

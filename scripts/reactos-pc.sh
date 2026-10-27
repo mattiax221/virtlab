@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Una VM ReactOS per ogni PC del lab (disco dedicato).
 # Solo UNA VM attiva alla volta (RAM limitata, no KVM).
+# IMPORTANTE: IDE + e1000 (ReactOS Live non gestisce bene virtio → schermo nero).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -8,7 +9,7 @@ ISO="${NETLAB_REACTOS_ISO:-$ROOT/vm/reactos/live.iso}"
 DISK_DIR="${NETLAB_REACTOS_DISKS:-$ROOT/vm/disks}"
 RUN_DIR="${NETLAB_REACTOS_RUN:-$ROOT/vm/run}"
 VNC_DISPLAY="${NETLAB_REACTOS_VNC_DISPLAY:-2}" # 5900+2 = 5902
-RAM_MB="${NETLAB_REACTOS_RAM_MB:-768}"
+RAM_MB="${NETLAB_REACTOS_RAM_MB:-1024}"
 NOVNC_PORT="${NETLAB_NOVNC_PORT:-6080}"
 
 mkdir -p "$DISK_DIR" "$RUN_DIR"
@@ -25,13 +26,18 @@ DEVICE_ID="${2:-}"
 PID_FILE="$RUN_DIR/qemu.pid"
 ACTIVE_FILE="$RUN_DIR/active-device"
 NOVNC_PID_FILE="$RUN_DIR/novnc.pid"
+MONITOR_SOCK="$RUN_DIR/qemu.monitor"
 
 stop_all() {
   if [[ -f "$PID_FILE" ]]; then
     pid="$(cat "$PID_FILE" || true)"
     if [[ -n "${pid:-}" ]] && kill -0 "$pid" 2>/dev/null; then
       kill "$pid" 2>/dev/null || true
-      wait "$pid" 2>/dev/null || true
+      for _ in 1 2 3 4 5; do
+        kill -0 "$pid" 2>/dev/null || break
+        sleep 0.4
+      done
+      kill -9 "$pid" 2>/dev/null || true
     fi
     rm -f "$PID_FILE"
   fi
@@ -42,10 +48,9 @@ stop_all() {
     fi
     rm -f "$NOVNC_PID_FILE"
   fi
-  # fallback: kill by name
   pkill -f "qemu-system-x86_64.*NetLab-ReactOS" 2>/dev/null || true
   pkill -f "websockify.*${NOVNC_PORT}" 2>/dev/null || true
-  rm -f "$ACTIVE_FILE"
+  rm -f "$ACTIVE_FILE" "$MONITOR_SOCK"
 }
 
 case "$CMD" in
@@ -69,7 +74,7 @@ case "$CMD" in
     if [[ -f "$NOVNC_PID_FILE" ]] && kill -0 "$(cat "$NOVNC_PID_FILE")" 2>/dev/null; then
       novnc=true
     fi
-    echo "{\"ok\":true,\"running\":$running,\"activeDevice\":\"$active\",\"isoPresent\":$iso,\"novnc\":$novnc,\"vncPort\":$((5900 + VNC_DISPLAY)),\"novncPort\":$NOVNC_PORT}"
+    echo "{\"ok\":true,\"running\":$running,\"activeDevice\":\"$active\",\"isoPresent\":$iso,\"novnc\":$novnc,\"vncPort\":$((5900 + VNC_DISPLAY)),\"novncPort\":$NOVNC_PORT,\"novncPath\":\"/novnc/vnc_lite.html\"}"
     ;;
   start)
     [[ -n "$DEVICE_ID" ]] || usage
@@ -86,19 +91,21 @@ case "$CMD" in
     if [[ -r /dev/kvm ]]; then
       ACCEL=(-enable-kvm -cpu host)
     fi
-    # Live CD + disco persistente per installazione successiva
+
+    # IDE + e1000: ReactOS Live 0.4.14 si blocca/nero con virtio
     qemu-system-x86_64 \
       "${ACCEL[@]}" \
       -m "$RAM_MB" \
       -smp 1 \
-      -drive "file=$disk,if=virtio,cache=writeback" \
-      -cdrom "$ISO" \
+      -drive "file=$disk,if=ide,index=0,media=disk" \
+      -drive "file=$ISO,if=ide,index=1,media=cdrom,readonly=on" \
       -boot order=d \
       -netdev user,id=net0 \
-      -device virtio-net-pci,netdev=net0 \
+      -device e1000,netdev=net0 \
       -vga std \
       -display none \
       -vnc "127.0.0.1:${VNC_DISPLAY}" \
+      -monitor "unix:$MONITOR_SOCK,server,nowait" \
       -name "NetLab-ReactOS-$DEVICE_ID" \
       -pidfile "$PID_FILE" \
       -daemonize
@@ -106,10 +113,10 @@ case "$CMD" in
     echo "$DEVICE_ID" > "$ACTIVE_FILE"
 
     websockify --web /usr/share/novnc "$NOVNC_PORT" "127.0.0.1:$((5900 + VNC_DISPLAY))" \
-      >/dev/null 2>&1 &
+      >/tmp/netlab-websockify.log 2>&1 &
     echo $! > "$NOVNC_PID_FILE"
 
-    echo "{\"ok\":true,\"running\":true,\"activeDevice\":\"$DEVICE_ID\",\"novncPort\":$NOVNC_PORT,\"vncPort\":$((5900 + VNC_DISPLAY))}"
+    echo "{\"ok\":true,\"running\":true,\"activeDevice\":\"$DEVICE_ID\",\"novncPort\":$NOVNC_PORT,\"vncPort\":$((5900 + VNC_DISPLAY)),\"novncPath\":\"/novnc/vnc_lite.html\"}"
     ;;
   *)
     usage

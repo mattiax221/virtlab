@@ -31,16 +31,32 @@ type OpenMode = "chooser" | "sim" | "reactos" | "panel" | "switch" | "router";
 
 const PALETTE: { title: string; types: DeviceKind[] }[] = [
   {
-    title: "End devices",
+    title: "End Devices (PT)",
     types: ["pc", "laptop", "server", "printer", "ip_phone"],
   },
   {
-    title: "Switch / Hub",
-    types: ["hub", "switch", "multilayer_switch"],
+    title: "Switches / Hub",
+    types: [
+      "hub",
+      "switch",
+      "switch_2950",
+      "switch_2960",
+      "switch_3560",
+      "switch_3650",
+      "multilayer_switch",
+    ],
   },
   {
-    title: "Router / Security",
-    types: ["router", "wireless_router", "firewall"],
+    title: "Routers / Security",
+    types: [
+      "router",
+      "router_1841",
+      "router_1941",
+      "router_2911",
+      "router_4321",
+      "wireless_router",
+      "firewall_asa",
+    ],
   },
   {
     title: "WAN / Wireless",
@@ -77,12 +93,17 @@ export function LabWorkspace() {
   function openDeviceUi(device: Device) {
     setOpenDeviceId(device.id);
     setSelectedId(device.id);
-    if (device.type === "switch" || device.type === "hub") {
+    if (
+      device.type === "switch" ||
+      device.type === "hub" ||
+      device.type.startsWith("switch_")
+    ) {
       setOpenMode("switch");
     } else if (
       device.type === "router" ||
+      device.type.startsWith("router_") ||
       device.type === "wireless_router" ||
-      device.type === "firewall" ||
+      device.type === "firewall_asa" ||
       device.type === "multilayer_switch"
     ) {
       setOpenMode("router");

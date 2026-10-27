@@ -10,10 +10,12 @@ export function ReactOsSession({
   device: Device;
   onClose: () => void;
 }) {
-  const [host, setHost] = useState("127.0.0.1");
+  const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    setHost(window.location.hostname);
+    // Give QEMU a moment; ReactOS Live is slow without KVM.
+    const t = window.setTimeout(() => setReady(true), 1500);
+    return () => window.clearTimeout(t);
   }, []);
 
   async function stopAndClose() {
@@ -29,7 +31,9 @@ export function ReactOsSession({
     onClose();
   }
 
-  const src = `http://${host}:6080/vnc_lite.html?autoconnect=1&resize=scale`;
+  // Same-origin via lab-gateway (/novnc → websockify). Works through Cloudflare.
+  const src =
+    "/novnc/vnc_lite.html?autoconnect=1&resize=scale&path=websockify&reconnect=1";
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-slate-950">
@@ -37,13 +41,12 @@ export function ReactOsSession({
         <div>
           <span className="font-medium">ReactOS — {device.name}</span>
           <span className="ml-2 hidden text-slate-500 sm:inline">
-            disco dedicato · IP statico da impostare dentro ReactOS (rete guest
-            NAT)
+            boot lento senza KVM · se vedi blu “Installing devices…” aspetta
           </span>
         </div>
         <div className="flex gap-2">
           <a
-            href={`http://${host}:6080/vnc.html?autoconnect=1`}
+            href={src}
             target="_blank"
             rel="noreferrer"
             className="rounded bg-slate-800 px-2 py-1 text-xs hover:bg-slate-700"
@@ -59,7 +62,17 @@ export function ReactOsSession({
           </button>
         </div>
       </div>
-      <iframe title={`ReactOS ${device.name}`} src={src} className="flex-1 border-0 bg-black" />
+      {ready ? (
+        <iframe
+          title={`ReactOS ${device.name}`}
+          src={src}
+          className="flex-1 border-0 bg-black"
+        />
+      ) : (
+        <div className="flex flex-1 items-center justify-center text-sm text-slate-400">
+          Avvio ReactOS (emulazione software, può richiedere 1–2 minuti)…
+        </div>
+      )}
     </div>
   );
 }

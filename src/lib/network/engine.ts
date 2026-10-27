@@ -20,25 +20,34 @@ export function uid(prefix: string): string {
 
 function defaultIfaces(type: DeviceKind, deviceId: string): InterfaceConfig[] {
   const meta = DEVICE_META[type];
-  const count = meta.ports;
+  // Cap UI/sim ports: real 24-port switch still works; keep first N usable.
+  const count = Math.min(meta.ports, type.startsWith("switch_") ? 24 : meta.ports);
   return Array.from({ length: count }, (_, i) => {
     let name = `Eth${i}`;
-    if (type === "switch" || type === "hub" || type === "multilayer_switch") {
-      name = `Fa0/${i}`;
-    } else if (type === "router" || type === "firewall" || type === "wireless_router") {
-      name = i === 0 ? "GigabitEthernet0/0" : `GigabitEthernet0/${i}`;
+    if (
+      type === "switch" ||
+      type === "hub" ||
+      type === "multilayer_switch" ||
+      type.startsWith("switch_")
+    ) {
+      name = i < 24 ? `FastEthernet0/${i}` : `GigabitEthernet0/${i - 24}`;
+    } else if (
+      type === "router" ||
+      type.startsWith("router_") ||
+      type === "firewall_asa" ||
+      type === "wireless_router"
+    ) {
+      name = `GigabitEthernet0/${i}`;
     } else if (type === "modem_dsl" || type === "modem_cable") {
-      name = i === 0 ? "LAN" : "WAN";
-    } else if (type === "pc" || type === "laptop" || type === "server") {
-      name = "Ethernet0";
-    } else if (type === "printer") {
-      name = "Ethernet0";
+      name = i === 0 ? "Ethernet0" : "ATM0";
+    } else if (type === "pc" || type === "laptop" || type === "server" || type === "printer") {
+      name = "FastEthernet0";
     } else if (type === "ip_phone") {
       name = i === 0 ? "Switchport" : "PC port";
     } else if (type === "access_point") {
-      name = "Ethernet0";
+      name = "Port 0";
     } else if (type === "cloud") {
-      name = `Port${i}`;
+      name = `Ethernet${i}`;
     }
     return {
       id: uid("if"),
@@ -79,8 +88,8 @@ export function createDemoLab(): LabState {
   const pc1 = createDevice("pc", "PC0", 120, 200);
   const pc2 = createDevice("pc", "PC1", 520, 200);
   const printer = createDevice("printer", "Printer0", 320, 80);
-  const sw = createDevice("switch", "Switch0", 320, 200);
-  const rtr = createDevice("router", "Router0", 320, 380);
+  const sw = createDevice("switch_2960", "Switch0", 320, 200);
+  const rtr = createDevice("router_2911", "Router0", 320, 380);
   const modem = createDevice("modem_cable", "CableModem0", 520, 380);
   const cloud = createDevice("cloud", "Internet", 700, 380);
 
@@ -577,7 +586,26 @@ function buildPingOk(toIp: string, count: number, baseRtt: number): string {
 }
 
 export function nextDeviceName(state: LabState, type: DeviceKind): string {
-  const prefix = DEVICE_META[type].label.replace(/\s+/g, "");
+  let prefix = DEVICE_META[type].label.replace(/\s+/g, "");
+  if (type === "switch" || type.startsWith("switch_") || type === "multilayer_switch") {
+    prefix = "Switch";
+  } else if (type === "router" || type.startsWith("router_")) {
+    prefix = "Router";
+  } else if (type === "firewall_asa") {
+    prefix = "ASA";
+  } else if (type === "wireless_router") {
+    prefix = "WirelessRouter";
+  } else if (type === "hub") {
+    prefix = "Hub";
+  } else if (type === "pc") {
+    prefix = "PC";
+  } else if (type === "laptop") {
+    prefix = "Laptop";
+  } else if (type === "server") {
+    prefix = "Server";
+  } else if (type === "printer") {
+    prefix = "Printer";
+  }
   let n = 0;
   const names = new Set(state.devices.map((d) => d.name));
   while (names.has(`${prefix}${n}`)) n++;
