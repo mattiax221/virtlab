@@ -20,14 +20,13 @@ import {
   type LabState,
 } from "@/lib/network/types";
 import { DeviceIcon } from "./DeviceIcon";
-import { HostOpenDialog } from "./HostOpenDialog";
 import { RouterConsole } from "./RouterConsole";
 import { SimpleDevicePanel } from "./SimpleDevicePanel";
 import { SwitchPanel } from "./SwitchPanel";
 import { WindowsDesktop } from "./WindowsDesktop";
 
 type Tool = "select" | "cable" | "delete";
-type OpenMode = "chooser" | "sim" | "panel" | "switch" | "router";
+type OpenMode = "sim" | "panel" | "switch" | "router";
 
 export function LabWorkspace() {
   const [state, setState] = useState<LabState>(() => createDemoLab());
@@ -82,7 +81,7 @@ export function LabWorkspace() {
       device.type === "laptop" ||
       device.type === "server"
     ) {
-      setOpenMode("chooser");
+      setOpenMode("sim");
     } else {
       setOpenMode("panel");
     }
@@ -165,7 +164,7 @@ export function LabWorkspace() {
             NetLab
           </div>
           <div className="text-[11px] text-slate-400">
-            Packet Tracer–like · ReactOS per host · resto simulato
+            Packet Tracer–like · PC Windows (Connessioni di rete) · resto simulato
           </div>
         </div>
 
@@ -212,12 +211,6 @@ export function LabWorkspace() {
         </ToolButton>
 
         <div className="ml-auto flex flex-wrap gap-2">
-          <a
-            href="/vnc"
-            className="rounded-md bg-orange-700/90 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-orange-600 sm:text-sm"
-          >
-            ReactOS / VNC
-          </a>
           <ToolButton
             onClick={() => {
               setState(createDemoLab());
@@ -244,8 +237,9 @@ export function LabWorkspace() {
             Dispositivi
           </h2>
           <p className="mt-1 text-[11px] leading-relaxed text-slate-500">
-            Catalogo in stile Packet Tracer (slice 1). Host con OS: PC / Laptop /
-            Server → ReactOS. Switch, modem, stampanti = simulati.
+            Catalogo in stile Packet Tracer. PC / Laptop / Server aprono un
+            desktop Windows con Connessioni di rete (IP statico). Switch, modem,
+            stampanti = simulati.
           </p>
           {PT_PALETTE.map((group) => (
             <div key={group.title} className="mt-3">
@@ -369,13 +363,6 @@ export function LabWorkspace() {
         </main>
       </div>
 
-      {openDevice && openMode === "chooser" && (
-        <HostOpenDialog
-          device={openDevice}
-          onClose={closeOpen}
-          onSimulated={() => setOpenMode("sim")}
-        />
-      )}
       {openDevice && openMode === "sim" && (
         <WindowsDesktop
           device={openDevice}
@@ -438,9 +425,6 @@ function SelectedInfo({
     <div className="mt-4 rounded border border-slate-700 bg-slate-950/50 p-3 text-xs">
       <div className="font-medium text-slate-200">{device.name}</div>
       <div className="mt-1 text-slate-500">{DEVICE_META[device.type].label}</div>
-      {device.osSlot && (
-        <div className="mt-1 text-orange-300/90">ReactOS slot: {device.osSlot}</div>
-      )}
       <button
         type="button"
         onClick={onOpen}

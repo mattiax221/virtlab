@@ -26,13 +26,14 @@ export default function Home() {
           NetLab
         </p>
         <h1 className="mt-4 max-w-2xl font-display text-2xl font-medium leading-snug text-sky-100/90 sm:text-3xl animate-[fadeUp_0.7s_ease_0.12s_both]">
-          Packet Tracer–like: topologia completa, IP statico, ReactOS su ogni PC.
+          Packet Tracer–like: topologia, cavi e IP statico sul desktop Windows del PC.
         </h1>
         <p className="mt-4 max-w-xl text-base leading-relaxed text-slate-400 animate-[fadeUp_0.7s_ease_0.2s_both]">
-          Switch, modem, stampanti e cloud sono simulati. PC / laptop / server
-          hanno desktop di rete (comandi veri) e possono aprire{" "}
-          <span className="text-orange-300">ReactOS</span> gratis, ciascuno col
-          proprio disco.
+          Doppio clic su un PC apre un mini Windows con{" "}
+          <span className="text-sky-300">
+            Pannello di controllo → Rete e Internet → Connessioni di rete
+          </span>
+          : Proprietà → TCP/IPv4 per l’IP statico. Switch, modem e stampanti restano simulati.
         </p>
         <div className="mt-8 flex flex-wrap gap-3 animate-[fadeUp_0.7s_ease_0.28s_both]">
           <Link
@@ -40,12 +41,6 @@ export default function Home() {
             className="rounded-md bg-sky-500 px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-sky-400"
           >
             Apri il laboratorio
-          </Link>
-          <Link
-            href="/vnc"
-            className="rounded-md border border-slate-600 px-5 py-3 text-sm text-slate-300 transition hover:border-slate-400"
-          >
-            Stato ReactOS / VNC
           </Link>
         </div>
       </div>

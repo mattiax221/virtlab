@@ -6,7 +6,10 @@ import {
   type CommandContext,
 } from "@/lib/network/commands";
 import type { Device, LabState } from "@/lib/network/types";
+import { NetworkConnections } from "./NetworkConnections";
 import { Terminal } from "./Terminal";
+
+type AppWindow = "network" | "cmd" | null;
 
 export function WindowsDesktop({
   device,
@@ -19,8 +22,12 @@ export function WindowsDesktop({
   setState: (next: LabState) => void;
   onClose: () => void;
 }) {
-  const eth = device.interfaces[0];
+  const live =
+    stateRef.current.devices.find((d) => d.id === device.id) ?? device;
+  const eth = live.interfaces[0];
   const [clock, setClock] = useState("--:--");
+  const [app, setApp] = useState<AppWindow>("network");
+
   useEffect(() => {
     const tick = () =>
       setClock(
@@ -48,13 +55,13 @@ export function WindowsDesktop({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-3 backdrop-blur-sm sm:p-6">
-      <div className="flex h-[min(720px,92vh)] w-full max-w-5xl flex-col overflow-hidden rounded-lg border border-slate-600/60 shadow-2xl">
+      <div className="flex h-[min(760px,94vh)] w-full max-w-5xl flex-col overflow-hidden rounded-lg border border-slate-600/60 shadow-2xl">
         <div className="flex items-center justify-between bg-slate-900 px-3 py-2 text-sm text-slate-200">
           <div className="flex items-center gap-2">
-            <span className="inline-block h-2.5 w-2.5 rounded-full bg-emerald-400 animate-pulse" />
-            <span className="font-medium">Sessione su {device.name}</span>
+            <span className="inline-block h-2.5 w-2.5 rounded-full bg-emerald-400" />
+            <span className="font-medium">Desktop — {device.name}</span>
             <span className="hidden text-slate-500 sm:inline">
-              — desktop Windows simulato · digita i comandi reali in CMD
+              · Connessioni di rete Windows (simulazione)
             </span>
           </div>
           <button
@@ -73,60 +80,92 @@ export function WindowsDesktop({
               "linear-gradient(145deg, #0c4a6e 0%, #0369a1 42%, #0ea5e9 100%)",
           }}
         >
-          <div
-            className="pointer-events-none absolute inset-0 opacity-30"
-            style={{
-              backgroundImage:
-                "radial-gradient(circle at 20% 20%, rgba(255,255,255,0.25), transparent 40%), radial-gradient(circle at 80% 0%, rgba(14,165,233,0.4), transparent 35%)",
-            }}
-          />
-
-          <div className="relative z-10 flex gap-4 p-4">
-            <DesktopIcon label="Questo PC" kind="pc" />
-            <DesktopIcon label="Prompt dei comandi" kind="cmd" active />
-            <DesktopIcon label="Rete" kind="net" />
+          <div className="relative z-10 flex flex-wrap gap-3 p-4">
+            <DesktopIcon
+              label="Questo PC"
+              kind="pc"
+              onClick={() => undefined}
+            />
+            <DesktopIcon
+              label="Connessioni di rete"
+              kind="net"
+              active={app === "network"}
+              onClick={() => setApp("network")}
+            />
+            <DesktopIcon
+              label="Prompt dei comandi"
+              kind="cmd"
+              active={app === "cmd"}
+              onClick={() => setApp("cmd")}
+            />
           </div>
 
-          <div className="relative z-10 mx-3 mb-3 flex min-h-0 flex-1 flex-col overflow-hidden rounded border border-slate-500/80 bg-[#0c0c0c] shadow-xl sm:mx-8 sm:mb-10">
-            <div className="flex items-center justify-between border-b border-slate-700 bg-[#1e1e1e] px-2 py-1.5 text-xs text-slate-200">
-              <div className="flex items-center gap-2">
-                <span className="inline-block h-3 w-3 rounded-sm bg-slate-500" />
-                <span>Amministratore: Prompt dei comandi — {device.name}</span>
-              </div>
-              <button
-                type="button"
-                className="px-2 text-slate-400 hover:bg-rose-600 hover:text-white"
-                onClick={onClose}
-              >
-                ✕
-              </button>
+          {app && (
+            <div className="relative z-10 mx-3 mb-3 flex min-h-0 flex-1 flex-col overflow-hidden rounded border border-slate-400/80 bg-[#f0f0f0] shadow-xl sm:mx-8 sm:mb-10">
+              {app === "network" ? (
+                <NetworkConnections
+                  device={device}
+                  stateRef={stateRef}
+                  setState={setState}
+                  onClose={() => setApp(null)}
+                />
+              ) : (
+                <>
+                  <div className="flex items-center justify-between border-b border-slate-700 bg-[#1e1e1e] px-2 py-1.5 text-xs text-slate-200">
+                    <span>Amministratore: Prompt dei comandi — {device.name}</span>
+                    <button
+                      type="button"
+                      className="px-2 text-slate-400 hover:bg-rose-600 hover:text-white"
+                      onClick={() => setApp(null)}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                  <div className="min-h-0 flex-1">
+                    <Terminal
+                      prompt={`C:\\Users\\Studente>`}
+                      accent="#f0f0f0"
+                      background="#0c0c0c"
+                      welcome={[
+                        `Microsoft Windows [Versione NetLab 10.0]`,
+                        `(c) NetLab — PC simulato (desktop + Connessioni di rete).`,
+                        ``,
+                        `Host: ${device.name}`,
+                        `IP attuale: ${eth?.ip ?? "(non configurato)"} · cavo: ${eth?.connectedLinkId ? "collegato" : "scollegato"}`,
+                        ``,
+                        `L'IP si imposta da Connessioni di rete (come in Windows).`,
+                        `Qui: ipconfig | ipconfig /all | ping <host>`,
+                        ``,
+                      ]}
+                      onCommand={(line) => runPcCommand(line, makeCtx())}
+                    />
+                  </div>
+                </>
+              )}
             </div>
-            <div className="min-h-0 flex-1">
-              <Terminal
-                prompt={`C:\\Users\\Studente>`}
-                accent="#f0f0f0"
-                background="#0c0c0c"
-                welcome={[
-                  `Microsoft Windows [Versione NetLab 10.0]`,
-                  `(c) NetLab Learning Environment. Nessuna VM reale — ma i comandi sono quelli veri.`,
-                  ``,
-                  `Host: ${device.name}`,
-                  `Interfaccia: ${eth?.name ?? "Ethernet0"} · cavo: ${eth?.connectedLinkId ? "collegato" : "scollegato"}`,
-                  `Digita help per i comandi. Prova: ipconfig   poi   ping 192.168.1.20`,
-                  ``,
-                ]}
-                onCommand={(line) => runPcCommand(line, makeCtx())}
-              />
-            </div>
-          </div>
+          )}
 
-          <div className="relative z-10 flex h-10 items-center gap-2 border-t border-slate-700/50 bg-slate-900/90 px-2 backdrop-blur">
+          {!app && (
+            <div className="relative z-10 mx-auto mb-16 max-w-sm rounded bg-black/30 px-4 py-3 text-center text-sm text-white/90">
+              Apri <strong>Connessioni di rete</strong> per impostare l’IP statico
+              (come in Windows).
+            </div>
+          )}
+
+          <div className="relative z-10 mt-auto flex h-10 items-center gap-2 border-t border-slate-700/50 bg-slate-900/90 px-2 backdrop-blur">
             <div className="flex h-8 w-10 items-center justify-center rounded bg-sky-700 text-xs font-bold text-white">
               N
             </div>
-            <div className="rounded bg-slate-800 px-3 py-1 text-xs text-slate-200">
-              Prompt dei comandi
-            </div>
+            {app === "network" && (
+              <div className="rounded bg-slate-800 px-3 py-1 text-xs text-slate-200">
+                Connessioni di rete
+              </div>
+            )}
+            {app === "cmd" && (
+              <div className="rounded bg-slate-800 px-3 py-1 text-xs text-slate-200">
+                Prompt dei comandi
+              </div>
+            )}
             <div className="ml-auto pr-2 text-xs text-slate-300">{clock} · Roma</div>
           </div>
         </div>
@@ -139,15 +178,19 @@ function DesktopIcon({
   label,
   kind,
   active,
+  onClick,
 }: {
   label: string;
   kind: "pc" | "cmd" | "net";
   active?: boolean;
+  onClick: () => void;
 }) {
   return (
-    <div
-      className={`flex w-20 flex-col items-center gap-1 rounded p-2 text-center text-[11px] text-white drop-shadow ${
-        active ? "bg-white/15 ring-1 ring-white/40" : "hover:bg-white/10"
+    <button
+      type="button"
+      onClick={onClick}
+      className={`flex w-[5.5rem] flex-col items-center gap-1 rounded p-2 text-center text-[11px] text-white drop-shadow ${
+        active ? "bg-white/20 ring-1 ring-white/50" : "hover:bg-white/10"
       }`}
     >
       <div className="flex h-10 w-10 items-center justify-center rounded bg-slate-900/40">
@@ -168,6 +211,6 @@ function DesktopIcon({
         )}
       </div>
       <span className="leading-tight">{label}</span>
-    </div>
+    </button>
   );
 }

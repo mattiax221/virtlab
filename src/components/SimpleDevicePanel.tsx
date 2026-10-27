@@ -41,8 +41,8 @@ export function SimpleDevicePanel({
           ))}
           <p className="pt-2 text-xs leading-relaxed text-slate-500">
             Questo dispositivo è simulato (come in Packet Tracer). La rete L2/L3
-            funziona con i cavi e gli IP configurati sugli host. Solo PC / Laptop
-            / Server possono aprire ReactOS reale.
+            funziona con i cavi e gli IP configurati su PC / Laptop / Server
+            (Connessioni di rete Windows).
           </p>
         </div>
       </div>
