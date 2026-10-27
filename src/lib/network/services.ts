@@ -10,15 +10,16 @@ import type {
   LabState,
 } from "./types";
 
+/** Default servizi Server-PT (DHCP/DNS/HTTP/Email/FTP/AAA). */
 export function defaultServerServices(name: string): DeviceServices {
   return {
+    domain: "lab.local",
     dhcp: {
       enabled: true,
       network: "192.168.1.0",
       mask: "255.255.255.0",
       gateway: "192.168.1.1",
       dns: "192.168.1.100",
-      // Evita collisione con IP statico tipico del server (.100)
       startIp: "192.168.1.101",
       endIp: "192.168.1.200",
       leases: [],
@@ -26,15 +27,57 @@ export function defaultServerServices(name: string): DeviceServices {
     dns: {
       enabled: true,
       records: [
-        { name: "server.lab", ip: "192.168.1.100" },
-        { name: "www.lab", ip: "192.168.1.100" },
-        { name: "router.lab", ip: "192.168.1.1" },
+        { name: "server.lab", type: "A", ip: "192.168.1.100" },
+        { name: "www.lab", type: "A", ip: "192.168.1.100" },
+        { name: "mail.lab", type: "A", ip: "192.168.1.100" },
+        { name: "router.lab", type: "A", ip: "192.168.1.1" },
+        { name: "www", type: "CNAME", target: "server.lab" },
       ],
     },
     http: {
       enabled: true,
+      https: true,
       title: `${name} — NetLab Web`,
-      body: "Benvenuto sul Server-PT.\nServizio HTTP attivo nel laboratorio.",
+      body: "Benvenuto sul Server-PT.\nHTTP/HTTPS attivo. Configura DNS/Email/FTP dal pannello Servizi.",
+      pages: [
+        { name: "index.html", body: "<h1>Server-PT</h1><p>NetLab</p>" },
+        { name: "helloworld.html", body: "<h1>Hello World</h1>" },
+      ],
+    },
+    email: {
+      enabled: true,
+      smtp: true,
+      pop3: true,
+      domain: "lab.local",
+      users: [
+        { username: "admin", password: "cisco" },
+        { username: "user1", password: "cisco" },
+      ],
+    },
+    ftp: {
+      enabled: true,
+      accounts: [
+        {
+          username: "cisco",
+          password: "cisco",
+          permissions: {
+            write: true,
+            read: true,
+            delete: true,
+            rename: true,
+            list: true,
+          },
+        },
+      ],
+      files: [
+        { name: "readme.txt", size: 48 },
+        { name: "secret.txt", size: 32 },
+      ],
+    },
+    aaa: {
+      enabled: false,
+      clients: [],
+      users: [{ username: "admin", password: "cisco" }],
     },
   };
 }
@@ -77,9 +120,6 @@ export function requestDhcp(
     client.interfaces[0];
   if (!iface) return { state, ok: false, message: "Interfaccia non trovata." };
   ifaceId = iface.id;
-  if (!iface.connectedLinkId && iface.media !== "wireless") {
-    // wireless may connect later; still need link for DHCP
-  }
   if (!iface.connectedLinkId) {
     return {
       state,
@@ -91,7 +131,6 @@ export function requestDhcp(
   const flood = l2Flood(state, clientId, { sourceMac: iface.mac });
   let next = flood.state;
 
-  // Discover DHCP servers in the L2 domain (including the servers themselves)
   const servers: Device[] = [];
   const seen = new Set<string>();
   for (const h of flood.hosts) {
@@ -102,11 +141,9 @@ export function requestDhcp(
       seen.add(d.id);
     }
   }
-  // Also check any L2-reachable device by walking all devices that appear in flood path
   for (const d of next.devices) {
     if (seen.has(d.id)) continue;
     if (!d.services?.dhcp?.enabled) continue;
-    // Must share L2 with client: re-check via flood from server
     const back = l2Flood(next, d.id);
     next = back.state;
     if (back.hosts.some((h) => h.device.id === clientId)) {
@@ -129,7 +166,6 @@ export function requestDhcp(
   for (const l of pool.leases) {
     if (!(l.deviceId === clientId && l.ifaceId === ifaceId)) used.add(l.ip);
   }
-  // Also mark static IPs in the domain
   for (const h of flood.hosts) {
     if (h.iface.ip) used.add(h.iface.ip);
   }
@@ -139,15 +175,17 @@ export function requestDhcp(
     }
   }
 
-  // Reuse existing lease for same MAC/iface
   let ip =
     pool.leases.find((l) => l.deviceId === clientId && l.ifaceId === ifaceId)
       ?.ip ?? null;
-  if (ip && used.has(ip) && !pool.leases.some((l) => l.ip === ip && l.ifaceId === ifaceId)) {
+  if (
+    ip &&
+    used.has(ip) &&
+    !pool.leases.some((l) => l.ip === ip && l.ifaceId === ifaceId)
+  ) {
     ip = null;
   }
   if (!ip) {
-    // Free this iface from used so we can reassign
     used.delete(
       pool.leases.find((l) => l.deviceId === clientId && l.ifaceId === ifaceId)
         ?.ip ?? "",
@@ -156,6 +194,9 @@ export function requestDhcp(
   }
   if (!ip) {
     return { state: next, ok: false, message: "Pool DHCP esaurito." };
+  }
+  if (!ipInRange(ip, pool.startIp, pool.endIp) && !pool.leases.some((l) => l.ip === ip)) {
+    ip = nextFreeIp(pool, used) ?? ip;
   }
 
   const leases = pool.leases.filter(
@@ -271,6 +312,29 @@ export function releaseDhcp(
   return { state: next, message: "Indirizzo IP rilasciato." };
 }
 
+function lookupDnsOnServer(
+  records: DnsRecord[],
+  q: string,
+  depth = 0,
+): string | null {
+  if (depth > 5) return null;
+  const rec = records.find((r) => r.name.toLowerCase() === q);
+  if (!rec) return null;
+  const t = rec.type ?? "A";
+  if (t === "A" && rec.ip) return rec.ip;
+  if ((t === "CNAME" || t === "NS") && rec.target) {
+    const next = rec.target.toLowerCase();
+    const asA = records.find(
+      (r) =>
+        r.name.toLowerCase() === next && (r.type ?? "A") === "A" && r.ip,
+    );
+    if (asA?.ip) return asA.ip;
+    return lookupDnsOnServer(records, next, depth + 1);
+  }
+  if (rec.ip) return rec.ip;
+  return null;
+}
+
 export function resolveDnsName(
   state: LabState,
   clientId: string,
@@ -286,7 +350,6 @@ export function resolveDnsName(
     for (const d of i.dnsServers) dnsIps.add(d);
   }
 
-  // Search DNS servers by IP, or any enabled DNS service in L2 domain
   const flood = l2Flood(state, clientId);
   const candidates: Device[] = [];
   for (const d of flood.state.devices) {
@@ -297,14 +360,15 @@ export function resolveDnsName(
   }
 
   for (const d of candidates) {
-    const rec = d.services?.dns?.records.find(
-      (r) => r.name.toLowerCase() === q,
-    );
-    if (rec) return rec.ip;
+    const ip = lookupDnsOnServer(d.services!.dns!.records, q);
+    if (ip) return ip;
   }
-  // Hostname match
-  for (const h of flood.hosts) {
-    if (h.device.name.toLowerCase() === q && h.iface.ip) return h.iface.ip;
+
+  // Fallback: qualsiasi DNS abilitato nel lab
+  for (const d of state.devices) {
+    if (!d.services?.dns?.enabled) continue;
+    const ip = lookupDnsOnServer(d.services.dns.records, q);
+    if (ip) return ip;
   }
   return null;
 }
@@ -335,6 +399,10 @@ export function updateDeviceServices(
           http: patch.http
             ? { ...(d.services?.http as HttpService), ...patch.http }
             : d.services?.http,
+          email: patch.email ?? d.services?.email,
+          ftp: patch.ftp ?? d.services?.ftp,
+          aaa: patch.aaa ?? d.services?.aaa,
+          domain: patch.domain ?? d.services?.domain,
         },
       };
     }),
@@ -342,8 +410,7 @@ export function updateDeviceServices(
 }
 
 /**
- * HTTP GET simulato. Passa `reachable: true` solo dopo un ping/rotta ok
- * (evita import circolare con engine.runPing).
+ * HTTP GET simulato. Passa `reachable: true` solo dopo un ping/rotta ok.
  */
 export function fetchHttp(
   state: LabState,
@@ -370,7 +437,6 @@ export function fetchHttp(
     return { ok: false, output: `Nessun servizio HTTP su ${ip}`, destIp: ip };
   }
   if (!opts?.reachable) {
-    // Senza check esterno: solo L2 (non fidarsi del solo gateway)
     const flood = l2Flood(state, clientId);
     const onL2 = flood.hosts.some((h) => h.device.id === server!.id);
     if (!onL2) {

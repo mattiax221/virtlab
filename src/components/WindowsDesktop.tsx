@@ -106,7 +106,7 @@ export function WindowsDesktop({
               active={app === "physical"}
               onClick={() => setApp("physical")}
             />
-            {live.type === "server" && (
+            {(live.type === "server" || live.type === "meraki_server") && (
               <DesktopIcon
                 label="Servizi"
                 kind="svc"
@@ -151,7 +151,8 @@ export function WindowsDesktop({
                   />
                 </>
               )}
-              {app === "services" && live.type === "server" && (
+              {app === "services" &&
+                (live.type === "server" || live.type === "meraki_server") && (
                 <ServerServices
                   device={device}
                   stateRef={stateRef}

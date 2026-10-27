@@ -4,8 +4,6 @@ import { inferCable, type CableKind } from "./catalog";
 import { getDevice, getIface } from "./engine-helpers";
 import { formatIp, isValidIp, parseIp, parseMask, sameSubnet } from "./ip";
 import { l2Flood } from "./l2";
-import { cableChoiceError } from "./linkStatus";
-import { requestDhcp } from "./services";
 import {
   availableModulesFor,
   defaultModulesFor,
@@ -15,7 +13,7 @@ import {
   slotCountFor,
   type ModuleKind,
 } from "./modules";
-import { resolveDnsName } from "./services";
+import { defaultServerServices, requestDhcp, resolveDnsName } from "./services";
 import {
   DEVICE_META,
   defaultVlans,
@@ -78,31 +76,16 @@ export function createDevice(
     };
   }
   if (type === "server" || type === "meraki_server") {
-    device.services = {
-      dhcp: {
-        enabled: true,
-        network: "192.168.1.0",
-        mask: "255.255.255.0",
-        gateway: "192.168.1.1",
-        dns: "192.168.1.100",
-        startIp: "192.168.1.101",
-        endIp: "192.168.1.200",
-        leases: [],
-      },
-      dns: {
-        enabled: true,
-        records: [
-          { name: "server.lab", ip: "192.168.1.100" },
-          { name: "www.lab", ip: "192.168.1.100" },
-          { name: "router.lab", ip: "192.168.1.1" },
-        ],
-      },
-      http: {
-        enabled: true,
-        title: `${name} — NetLab Web`,
-        body: "Benvenuto sul Server-PT.\nHTTP attivo. Prova: curl/http da un PC.",
-      },
-    };
+    device.services = defaultServerServices(name);
+    // IP statico tipico Server-PT sulla prima Ethernet
+    const eth0 = device.interfaces.find((i) => i.media === "ethernet");
+    if (eth0) {
+      eth0.ip = "192.168.1.100";
+      eth0.mask = "255.255.255.0";
+      eth0.gateway = "192.168.1.1";
+      eth0.dnsServers = ["192.168.1.100"];
+      eth0.dhcpClient = false;
+    }
   }
   if (isL3Device(type) || type.startsWith("firewall")) {
     device.accessLists = [];
@@ -492,15 +475,7 @@ export function connectDevices(
   const compat = ifaceLinkCompatible(aIf, bIf, media);
   if (compat) return { state, error: compat };
 
-  // Controlli stile Packet Tracer: cavo sbagliato → rifiuta (niente LED verde)
-  const choice = cableChoiceError(
-    a,
-    b,
-    media as Exclude<CableKind, "auto">,
-    aIf,
-    bIf,
-  );
-  if (choice) return { state, error: choice };
+  // Cavo sbagliato: si collega lo stesso → LED rosso via evaluateLink, senza L2
 
   const link: Link = {
     id: uid("link"),

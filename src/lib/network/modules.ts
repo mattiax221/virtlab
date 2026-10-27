@@ -246,12 +246,15 @@ export function defaultModulesFor(
       return [{ id: uid("mod"), kind: "host_wifi", slot: 0 }];
     }
     if (type === "analog_phone" || type === "voip_device") return [];
-    if (
-      type === "pc" ||
-      type === "laptop" ||
-      type === "server" ||
-      type === "meraki_server"
-    ) {
+    if (type === "server" || type === "meraki_server") {
+      // Server-PT: 2× Ethernet + Wi‑Fi (docs Configuring Servers)
+      return [
+        { id: uid("mod"), kind: "host_fe", slot: 0 },
+        { id: uid("mod"), kind: "host_fe", slot: 1 },
+        { id: uid("mod"), kind: "host_wifi", slot: 2 },
+      ];
+    }
+    if (type === "pc" || type === "laptop") {
       return [
         { id: uid("mod"), kind: "host_fe", slot: 0 },
         { id: uid("mod"), kind: "host_wifi", slot: 1 },

@@ -227,18 +227,76 @@ export type DhcpPool = {
   leases: DhcpLease[];
 };
 
-export type DnsRecord = { name: string; ip: string };
+export type DnsRecordType = "A" | "CNAME" | "NS" | "SOA";
+
+export type DnsRecord = {
+  name: string;
+  /** Default A se assente (lab vecchi) */
+  type?: DnsRecordType;
+  /** Indirizzo per record A */
+  ip?: string;
+  /** Target per CNAME / NS / SOA primary */
+  target?: string;
+};
 
 export type HttpService = {
   enabled: boolean;
+  https?: boolean;
   title: string;
   body: string;
+  /** Pagine aggiuntive nome → HTML/testo */
+  pages?: { name: string; body: string }[];
 };
 
+export type ServerUser = { username: string; password: string };
+
+export type EmailService = {
+  enabled: boolean;
+  smtp: boolean;
+  pop3: boolean;
+  domain: string;
+  users: ServerUser[];
+};
+
+export type FtpPermissions = {
+  write: boolean;
+  read: boolean;
+  delete: boolean;
+  rename: boolean;
+  list: boolean;
+};
+
+export type FtpAccount = ServerUser & { permissions: FtpPermissions };
+
+export type FtpService = {
+  enabled: boolean;
+  accounts: FtpAccount[];
+  files: { name: string; size: number }[];
+};
+
+export type AaaClient = {
+  name: string;
+  ip: string;
+  secret: string;
+  type: "radius" | "tacacs";
+};
+
+export type AaaService = {
+  enabled: boolean;
+  clients: AaaClient[];
+  users: ServerUser[];
+};
+
+/** Servizi Server-PT (docs PT Configuring Servers) */
 export type DeviceServices = {
+  /** Dominio globale (email / zona DNS) es. lab.local */
+  domain?: string;
   dhcp?: DhcpPool;
   dns?: { enabled: boolean; records: DnsRecord[] };
   http?: HttpService;
+  email?: EmailService;
+  ftp?: FtpService;
+  aaa?: AaaService;
 };
 
 export type Link = {
