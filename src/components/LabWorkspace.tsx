@@ -285,7 +285,10 @@ export function LabWorkspace() {
               if (tool === "select") setSelectedId(null);
             }}
           >
-            <svg className="pointer-events-none absolute inset-0 h-full w-full">
+            <svg
+              className="absolute inset-0 h-full w-full"
+              style={{ pointerEvents: tool === "delete" ? "auto" : "none" }}
+            >
               {state.links.map((link) => {
                 const a = state.devices.find((d) => d.id === link.aDeviceId);
                 const b = state.devices.find((d) => d.id === link.bDeviceId);
@@ -308,22 +311,22 @@ export function LabWorkspace() {
                       strokeOpacity="0.85"
                       strokeDasharray={link.media === "wireless" ? "4 3" : undefined}
                     />
-                    <line
-                      x1={a.x}
-                      y1={a.y}
-                      x2={b.x}
-                      y2={b.y}
-                      stroke="transparent"
-                      strokeWidth="14"
-                      className="pointer-events-auto cursor-pointer"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (tool === "delete") {
+                    {tool === "delete" && (
+                      <line
+                        x1={a.x}
+                        y1={a.y}
+                        x2={b.x}
+                        y2={b.y}
+                        stroke="transparent"
+                        strokeWidth="14"
+                        className="cursor-pointer"
+                        onClick={(e) => {
+                          e.stopPropagation();
                           setState((s) => deleteLink(s, link.id));
                           showToast("Cavo rimosso");
-                        }
-                      }}
-                    />
+                        }}
+                      />
+                    )}
                   </g>
                 );
               })}

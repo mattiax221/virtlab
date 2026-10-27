@@ -1,12 +1,15 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
-  cacheComponents: true,
-  partialPrefetching: true,
-  // Cloud / preview browsers often hit 127.0.0.1; without this, /_next JS is blocked
-  // and client onClick handlers never hydrate.
-  allowedDevOrigins: ["127.0.0.1", "localhost"],
+  // Dev-only origin checks: without these, Chrome via Cloudflare tunnel gets
+  // static HTML but no hydrated React — clicks/drag/add do nothing.
+  allowedDevOrigins: [
+    "127.0.0.1",
+    "localhost",
+    "*.trycloudflare.com",
+    "officials-paying-charged-beaver.trycloudflare.com",
+    "motion-tobago-fri-overnight.trycloudflare.com",
+  ],
   turbopack: {
     rules: {
       "*.css": {
