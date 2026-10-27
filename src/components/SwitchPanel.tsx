@@ -9,6 +9,7 @@ import {
   type RouterCliState,
 } from "@/lib/network/commands";
 import { isManagedSwitch, type Device, type LabState } from "@/lib/network/types";
+import { PhysicalPanel } from "./PhysicalPanel";
 import { Terminal } from "./Terminal";
 
 export function SwitchPanel({
@@ -25,7 +26,7 @@ export function SwitchPanel({
   const live =
     stateRef.current.devices.find((d) => d.id === device.id) ?? device;
   const managed = isManagedSwitch(live.type);
-  const [tab, setTab] = useState<"ports" | "cli">("ports");
+  const [tab, setTab] = useState<"ports" | "cli" | "physical">("ports");
   const [cli, setCli] = useState<RouterCliState>(() =>
     initialRouterCli(live.name),
   );
@@ -63,18 +64,27 @@ export function SwitchPanel({
           </button>
         </div>
 
-        {managed && (
-          <div className="flex gap-1 border-b border-slate-800 px-3 pt-2">
-            <TabBtn active={tab === "ports"} onClick={() => setTab("ports")}>
-              Porte / LED
-            </TabBtn>
+        <div className="flex gap-1 border-b border-slate-800 px-3 pt-2">
+          <TabBtn active={tab === "ports"} onClick={() => setTab("ports")}>
+            Porte / LED
+          </TabBtn>
+          {managed && (
             <TabBtn active={tab === "cli"} onClick={() => setTab("cli")}>
               Console CLI
             </TabBtn>
-          </div>
-        )}
+          )}
+          <TabBtn active={tab === "physical"} onClick={() => setTab("physical")}>
+            Physical
+          </TabBtn>
+        </div>
 
-        {tab === "ports" || !managed ? (
+        {tab === "physical" ? (
+          <PhysicalPanel
+            device={device}
+            stateRef={stateRef}
+            setState={setState}
+          />
+        ) : tab === "ports" || !managed ? (
           <div className="min-h-0 flex-1 overflow-y-auto p-4">
             <div className="mb-3 flex flex-wrap items-center gap-3 text-[11px] text-slate-500">
               <Legend color="bg-emerald-400" label="up / connected" />
@@ -174,6 +184,9 @@ export function SwitchPanel({
                 `  show vlan brief`,
                 `  show mac address-table`,
                 `  show interfaces status`,
+                ``,
+                `Trunk verso router (inter-VLAN):`,
+                `  interface Fa0/X → switchport mode trunk`,
                 ``,
               ]}
               onCommand={(line) => {

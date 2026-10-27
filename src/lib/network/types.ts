@@ -64,6 +64,14 @@ export type InterfaceConfig = {
   nativeVlan: number;
   /** trunk: 'all' or explicit list */
   allowedVlans: number[] | "all";
+  /** Physical media (from module) */
+  media: "ethernet" | "wireless" | "serial" | "fiber" | "coaxial" | "phone";
+  /** Owning physical module id (null for legacy/orphan) */
+  moduleId: string | null;
+  /** Subinterface: parent physical iface id */
+  parentIfaceId: string | null;
+  /** encapsulation dot1Q VLAN (subinterface) */
+  vlanTag: number | null;
 };
 
 export type VlanRecord = {
@@ -78,6 +86,12 @@ export type MacEntry = {
   type: "dynamic" | "static";
 };
 
+export type InstalledModule = {
+  id: string;
+  kind: string;
+  slot: number;
+};
+
 export type Device = {
   id: string;
   type: DeviceKind;
@@ -90,6 +104,12 @@ export type Device = {
   vlans?: VlanRecord[];
   /** Learned / static MAC address table */
   macTable?: MacEntry[];
+  /** Physical modules (NIC, WIC, uplink…) */
+  modules: InstalledModule[];
+  /** Max module slots */
+  slots: number;
+  /** Powered on — modules can change when off (PT-style) */
+  powered: boolean;
 };
 
 export type Link = {

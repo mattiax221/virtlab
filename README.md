@@ -12,6 +12,8 @@ Laboratorio stile **Cisco Packet Tracer** nel browser.
 - Prompt dei comandi: `ipconfig`, `ping`, …
 - **L2 switch (Cisco-like)**: LED porte, VLAN access/trunk, `show vlan brief`,
   `show mac address-table`, `show interfaces status`, isolamento tra VLAN
+- **Inter-VLAN**: router-on-a-stick (`interface Gi0/0.10` + `encapsulation dot1Q`)
+- **Physical**: spegni il device → rimuovi/aggiungi moduli (Ethernet, Wi‑Fi, WIC, uplink)
 - Motore L2/L3 con flood VLAN-aware + learning MAC
 
 ## Avvio

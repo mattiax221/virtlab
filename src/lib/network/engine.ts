@@ -1,7 +1,16 @@
 import { inferCable, type CableKind } from "./catalog";
 import { getDevice, getIface } from "./engine-helpers";
-import { formatIp, isValidIp, parseIp, parseMask, randomMac, sameSubnet } from "./ip";
+import { formatIp, isValidIp, parseIp, parseMask, sameSubnet } from "./ip";
 import { l2Flood } from "./l2";
+import {
+  availableModulesFor,
+  defaultModulesFor,
+  interfacesFromModules,
+  isModuleRemovable,
+  MODULE_CATALOG,
+  slotCountFor,
+  type ModuleKind,
+} from "./modules";
 import {
   DEVICE_META,
   defaultVlans,
@@ -9,6 +18,7 @@ import {
   isManagedSwitch,
   type Device,
   type DeviceKind,
+  type InstalledModule,
   type InterfaceConfig,
   type LabState,
   type Link,
@@ -17,77 +27,12 @@ import {
 } from "./types";
 
 export { getDevice, getIface };
+export { availableModulesFor, MODULE_CATALOG, isModuleRemovable };
 
 let idCounter = 0;
 export function uid(prefix: string): string {
   idCounter += 1;
   return `${prefix}-${idCounter}`;
-}
-
-function defaultIfaces(type: DeviceKind, deviceId: string): InterfaceConfig[] {
-  const meta = DEVICE_META[type];
-  const count = Math.min(meta.ports, 26);
-  return Array.from({ length: count }, (_, i) => {
-    let name = `Eth${i}`;
-    if (
-      type === "switch" ||
-      type === "hub" ||
-      type === "multilayer_switch" ||
-      type.startsWith("switch_")
-    ) {
-      // PT: Fa0/1..Fa0/24 then Gig0/1..
-      if (i < 24) name = `FastEthernet0/${i + 1}`;
-      else name = `GigabitEthernet0/${i - 23}`;
-    } else if (type === "router_1841" || type === "router_2811" || type === "router") {
-      name = `FastEthernet0/${i}`;
-    } else if (type.startsWith("router_") || type === "wireless_router" || type === "home_router") {
-      if (type === "router_4321" || type === "router_4331") {
-        name = `GigabitEthernet0/0/${i}`;
-      } else {
-        name = `GigabitEthernet0/${i}`;
-      }
-    } else if (type.startsWith("firewall_")) {
-      name = `Ethernet0/${i}`;
-    } else if (type === "modem_dsl" || type === "modem_cable") {
-      name = i === 0 ? "Ethernet0" : type === "modem_cable" ? "Coaxial0" : "Modem0";
-    } else if (
-      type === "pc" ||
-      type === "laptop" ||
-      type === "server" ||
-      type === "printer" ||
-      type === "tablet" ||
-      type === "smartphone" ||
-      type === "tv"
-    ) {
-      name = "FastEthernet0";
-    } else if (type === "ip_phone") {
-      name = i === 0 ? "Switchport" : "PC port";
-    } else if (type === "analog_phone") {
-      name = "Phone0";
-    } else if (type === "access_point" || type === "ap_n" || type === "lap") {
-      name = "Port 0";
-    } else if (type === "wlc") {
-      name = `GigabitEthernet0/${i}`;
-    } else if (type === "cloud" || type === "co_server") {
-      name = `Ethernet${i}`;
-    } else if (type === "bridge" || type === "repeater") {
-      name = `Port${i}`;
-    }
-    return {
-      id: uid("if"),
-      name,
-      ip: null,
-      mask: null,
-      gateway: null,
-      mac: randomMac(`${deviceId}-${name}`),
-      connectedLinkId: null,
-      enabled: true,
-      mode: "access" as const,
-      accessVlan: 1,
-      nativeVlan: 1,
-      allowedVlans: "all" as const,
-    };
-  });
 }
 
 export function createDevice(
@@ -97,13 +42,17 @@ export function createDevice(
   y: number,
 ): Device {
   const id = uid(type);
+  const modules = defaultModulesFor(type, id, uid);
   const device: Device = {
     id,
     type,
     name,
     x,
     y,
-    interfaces: defaultIfaces(type, id),
+    modules,
+    slots: slotCountFor(type),
+    powered: true,
+    interfaces: interfacesFromModules(type, id, modules as InstalledModule[], uid),
     osSlot: DEVICE_META[type].hasOs ? id : undefined,
   };
   if (isManagedSwitch(type)) {
@@ -111,6 +60,186 @@ export function createDevice(
     device.macTable = [];
   }
   return device;
+}
+
+/** Drop links attached to removed interfaces */
+function pruneLinksForDevice(state: LabState, deviceId: string, keepIfaceIds: Set<string>): LabState {
+  const dropLinkIds = new Set<string>();
+  const device = getDevice(state, deviceId);
+  if (!device) return state;
+  for (const iface of device.interfaces) {
+    if (!keepIfaceIds.has(iface.id) && iface.connectedLinkId) {
+      dropLinkIds.add(iface.connectedLinkId);
+    }
+  }
+  if (dropLinkIds.size === 0) return state;
+  let next = state;
+  for (const lid of dropLinkIds) next = deleteLink(next, lid);
+  return next;
+}
+
+export function setDevicePower(
+  state: LabState,
+  deviceId: string,
+  powered: boolean,
+): LabState {
+  return {
+    ...state,
+    devices: state.devices.map((d) =>
+      d.id === deviceId ? { ...d, powered } : d,
+    ),
+  };
+}
+
+export function installModule(
+  state: LabState,
+  deviceId: string,
+  kind: ModuleKind,
+  slot?: number,
+): { state: LabState; error?: string } {
+  const device = getDevice(state, deviceId);
+  if (!device) return { state, error: "Dispositivo non trovato." };
+  if (device.powered) {
+    return { state, error: "Spegni il dispositivo (Physical) prima di cambiare i moduli." };
+  }
+  const allowed = availableModulesFor(device.type);
+  if (!allowed.includes(kind)) {
+    return { state, error: "Questo modulo non è compatibile." };
+  }
+  const used = new Set(device.modules.map((m) => m.slot));
+  let target = slot;
+  if (target == null) {
+    for (let i = 0; i < device.slots; i++) {
+      if (!used.has(i)) {
+        target = i;
+        break;
+      }
+    }
+  }
+  if (target == null || used.has(target)) {
+    return { state, error: "Nessuno slot libero." };
+  }
+  if (target < 0 || target >= device.slots) {
+    return { state, error: "Slot non valido." };
+  }
+  const mod: InstalledModule = { id: uid("mod"), kind, slot: target };
+  const modules = [...device.modules, mod];
+  const interfaces = interfacesFromModules(
+    device.type,
+    device.id,
+    modules,
+    uid,
+    device.interfaces,
+  );
+  return {
+    state: {
+      ...state,
+      devices: state.devices.map((d) =>
+        d.id === deviceId ? { ...d, modules, interfaces } : d,
+      ),
+    },
+  };
+}
+
+export function removeModule(
+  state: LabState,
+  deviceId: string,
+  moduleId: string,
+): { state: LabState; error?: string } {
+  const device = getDevice(state, deviceId);
+  if (!device) return { state, error: "Dispositivo non trovato." };
+  if (device.powered) {
+    return { state, error: "Spegni il dispositivo prima di rimuovere moduli." };
+  }
+  const mod = device.modules.find((m) => m.id === moduleId);
+  if (!mod) return { state, error: "Modulo non trovato." };
+  if (!isModuleRemovable(mod as { id: string; kind: ModuleKind; slot: number }, device.type)) {
+    return { state, error: "Questo modulo non è rimovibile." };
+  }
+  const modules = device.modules.filter((m) => m.id !== moduleId);
+  const interfaces = interfacesFromModules(
+    device.type,
+    device.id,
+    modules,
+    uid,
+    device.interfaces.filter((i) => i.moduleId !== moduleId),
+  );
+  const keep = new Set(interfaces.map((i) => i.id));
+  let next: LabState = {
+    ...state,
+    devices: state.devices.map((d) =>
+      d.id === deviceId ? { ...d, modules, interfaces } : d,
+    ),
+  };
+  next = pruneLinksForDevice(next, deviceId, keep);
+  // Re-apply interfaces after link prune (connectedLinkId cleared)
+  const d2 = getDevice(next, deviceId)!;
+  const ifaces2 = d2.interfaces.map((i) =>
+    i.connectedLinkId &&
+    !next.links.some((l) => l.id === i.connectedLinkId)
+      ? { ...i, connectedLinkId: null }
+      : i,
+  );
+  next = {
+    ...next,
+    devices: next.devices.map((d) =>
+      d.id === deviceId ? { ...d, interfaces: ifaces2 } : d,
+    ),
+  };
+  return { state: next };
+}
+
+export function createSubinterface(
+  state: LabState,
+  deviceId: string,
+  parentIfaceId: string,
+  vlanTag: number,
+): { state: LabState; iface?: InterfaceConfig; error?: string } {
+  const device = getDevice(state, deviceId);
+  if (!device) return { state, error: "Dispositivo non trovato." };
+  const parent = getIface(device, parentIfaceId);
+  if (!parent || parent.parentIfaceId) {
+    return { state, error: "Interfaccia padre non valida." };
+  }
+  if (!Number.isInteger(vlanTag) || vlanTag < 1 || vlanTag > 4094) {
+    return { state, error: "VLAN tag non valido." };
+  }
+  const name = `${parent.name}.${vlanTag}`;
+  if (device.interfaces.some((i) => i.name.toLowerCase() === name.toLowerCase())) {
+    const existing = device.interfaces.find(
+      (i) => i.name.toLowerCase() === name.toLowerCase(),
+    )!;
+    return { state, iface: existing };
+  }
+  const iface: InterfaceConfig = {
+    id: uid("if"),
+    name,
+    ip: null,
+    mask: null,
+    gateway: null,
+    mac: parent.mac,
+    connectedLinkId: null, // uses parent link
+    enabled: true,
+    mode: "access",
+    accessVlan: vlanTag,
+    nativeVlan: 1,
+    allowedVlans: "all",
+    media: parent.media,
+    moduleId: parent.moduleId,
+    parentIfaceId: parent.id,
+    vlanTag,
+  };
+  return {
+    state: {
+      ...state,
+      devices: state.devices.map((d) =>
+        d.id === deviceId
+          ? { ...d, interfaces: [...d.interfaces, iface] }
+          : d,
+      ),
+    },
+    iface,
+  };
 }
 
 export function createEmptyLab(): LabState {
@@ -174,7 +303,34 @@ export function createDemoLab(): LabState {
 }
 
 export function getFreeIface(device: Device): InterfaceConfig | undefined {
-  return device.interfaces.find((i) => !i.connectedLinkId);
+  return device.interfaces.find(
+    (i) => !i.connectedLinkId && !i.parentIfaceId && i.enabled,
+  );
+}
+
+function ifaceLinkCompatible(
+  a: InterfaceConfig,
+  b: InterfaceConfig,
+  media: CableKind,
+): string | null {
+  if (media === "wireless") {
+    if (a.media !== "wireless" && b.media !== "wireless") {
+      return "Associazione wireless: serve almeno una porta Wi‑Fi.";
+    }
+  }
+  if (a.media === "wireless" || b.media === "wireless") {
+    if (media !== "wireless" && media !== "auto") {
+      return "Porta Wi‑Fi: usa cavo/associazione Wireless.";
+    }
+  }
+  if (
+    (a.media === "serial" || b.media === "serial") &&
+    media !== "serial" &&
+    media !== "auto"
+  ) {
+    return "Porte seriali richiedono cavo Serial.";
+  }
+  return null;
 }
 
 export function connectDevices(
@@ -188,13 +344,34 @@ export function connectDevices(
   const b = getDevice(state, bId);
   if (!a || !b) return { state, error: "Dispositivo non trovato." };
 
-  const aIf = getFreeIface(a);
-  const bIf = getFreeIface(b);
-  if (!aIf || !bIf) {
+  // Prefer matching media when auto (e.g. wifi↔ap)
+  const aFree = a.interfaces.filter((i) => !i.connectedLinkId && !i.parentIfaceId && i.enabled);
+  const bFree = b.interfaces.filter((i) => !i.connectedLinkId && !i.parentIfaceId && i.enabled);
+  if (!aFree.length || !bFree.length) {
     return { state, error: "Nessuna porta libera su uno dei due dispositivi." };
   }
 
-  const media = cable === "auto" ? inferCable(a.type, b.type) : cable;
+  let media = cable === "auto" ? inferCable(a.type, b.type) : cable;
+  let aIf = aFree[0];
+  let bIf = bFree[0];
+  if (cable === "auto" || cable === "wireless") {
+    const aw = aFree.find((i) => i.media === "wireless");
+    const bw = bFree.find((i) => i.media === "wireless");
+    if (aw && bw) {
+      aIf = aw;
+      bIf = bw;
+      media = "wireless";
+    } else if (aw) {
+      aIf = aw;
+      media = "wireless";
+    } else if (bw) {
+      bIf = bw;
+      media = "wireless";
+    }
+  }
+
+  const compat = ifaceLinkCompatible(aIf, bIf, media);
+  if (compat) return { state, error: compat };
 
   const link: Link = {
     id: uid("link"),
@@ -274,6 +451,7 @@ export function updateIface(
       | "accessVlan"
       | "nativeVlan"
       | "allowedVlans"
+      | "vlanTag"
     >
   >,
 ): LabState {
@@ -328,6 +506,10 @@ function findLocalRoute(device: Device, destIp: string): InterfaceConfig | null 
   return device.interfaces.find((i) => i.ip && i.mask && i.gateway && i.enabled) ?? null;
 }
 
+/**
+ * Discover L2 hosts reachable from each router interface / subinterface
+ * (router-on-a-stick: subiface uses parent trunk + vlanTag).
+ */
 function collectRouterDomains(
   state: LabState,
   router: Device,
@@ -335,15 +517,38 @@ function collectRouterDomains(
   let next = state;
   const found: Endpoint[] = [];
   const seen = new Set<string>();
+
   for (const iface of router.interfaces) {
-    if (!iface.connectedLinkId || !iface.enabled) continue;
-    const link = next.links.find((l) => l.id === iface.connectedLinkId);
-    if (!link || link.media === "console") continue;
-    const otherId =
-      link.aDeviceId === router.id ? link.bDeviceId : link.aDeviceId;
-    const flood = l2Flood(next, otherId, { sourceMac: iface.mac });
+    if (!iface.enabled || !iface.ip || !iface.mask) continue;
+
+    let peerDeviceId: string | null = null;
+    let vlanHint: number | undefined;
+
+    if (iface.parentIfaceId && iface.vlanTag != null) {
+      const parent = getIface(router, iface.parentIfaceId);
+      if (!parent?.connectedLinkId) continue;
+      const link = next.links.find((l) => l.id === parent.connectedLinkId);
+      if (!link || link.media === "console") continue;
+      peerDeviceId =
+        link.aDeviceId === router.id ? link.bDeviceId : link.aDeviceId;
+      vlanHint = iface.vlanTag;
+    } else if (iface.connectedLinkId) {
+      const link = next.links.find((l) => l.id === iface.connectedLinkId);
+      if (!link || link.media === "console") continue;
+      peerDeviceId =
+        link.aDeviceId === router.id ? link.bDeviceId : link.aDeviceId;
+    } else {
+      continue;
+    }
+
+    const flood = l2Flood(next, peerDeviceId, {
+      sourceMac: iface.mac,
+      vlanHint,
+    });
     next = flood.state;
     for (const h of flood.hosts) {
+      // Only hosts on this connected subnet
+      if (!h.iface.ip || !sameSubnet(iface.ip, h.iface.ip, iface.mask)) continue;
       if (!seen.has(h.iface.id)) {
         seen.add(h.iface.id);
         found.push(h);

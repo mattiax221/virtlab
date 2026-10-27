@@ -1,4 +1,5 @@
 import {
+  createSubinterface,
   getDevice,
   runPing,
   updateDevice,
@@ -47,7 +48,9 @@ function helpRouter(): string {
     "  show ip interface brief",
     "  show interfaces",
     "  configure terminal",
-    "  interface <nome>         es. interface GigabitEthernet0/0",
+    "  interface <nome>              es. GigabitEthernet0/0",
+    "  interface <nome>.<vlan>       subinterface (router-on-a-stick)",
+    "  encapsulation dot1Q <vlan>",
     "  ip address <ip> <mask>",
     "  no shutdown",
     "  exit",
@@ -55,14 +58,13 @@ function helpRouter(): string {
     "  hostname <nome>",
     "  help",
     "",
-    "Flusso tipico:",
-    "  enable",
-    "  configure terminal",
-    "  interface GigabitEthernet0/0",
-    "  ip address 192.168.1.1 255.255.255.0",
+    "Inter-VLAN (router-on-a-stick):",
+    "  conf t",
+    "  interface GigabitEthernet0/0.10",
+    "  encapsulation dot1Q 10",
+    "  ip address 192.168.10.1 255.255.255.0",
     "  no shutdown",
-    "  exit",
-    "  exit",
+    "  (ripeti per .20) — sullo switch: porta verso router in trunk",
   ].join("\n");
 }
 
@@ -380,6 +382,33 @@ export function runRouterCommand(
 
   if (lower.startsWith("interface ") && cli.mode === "config") {
     const name = parts.slice(1).join(" ");
+    // Subinterface: Gi0/0.10
+    const sub = name.match(/^(.+)\.(\d+)$/);
+    if (sub) {
+      const parentName = sub[1];
+      const tag = Number(sub[2]);
+      const parent = findIfaceByName(device, parentName);
+      if (!parent || parent.parentIfaceId) {
+        return { output: `% Invalid parent interface: ${parentName}` };
+      }
+      const created = createSubinterface(
+        ctx.state,
+        ctx.deviceId,
+        parent.id,
+        tag,
+      );
+      if (created.error || !created.iface) {
+        return { output: created.error ?? "% Failed" };
+      }
+      ctx.setState(created.state);
+      setCli({
+        ...cli,
+        mode: "config-if",
+        ifaceId: created.iface.id,
+        vlanId: null,
+      });
+      return { output: "" };
+    }
     const iface = findIfaceByName(device, name);
     if (!iface) {
       return {
@@ -390,6 +419,39 @@ export function runRouterCommand(
       };
     }
     setCli({ ...cli, mode: "config-if", ifaceId: iface.id, vlanId: null });
+    return { output: "" };
+  }
+
+  if (
+    (lower.startsWith("encapsulation dot1q ") ||
+      lower.startsWith("encapsulation dot1Q ")) &&
+    cli.mode === "config-if" &&
+    cli.ifaceId
+  ) {
+    const tag = Number(parts[2]);
+    if (!Number.isInteger(tag) || tag < 1 || tag > 4094) {
+      return { output: "% Invalid VLAN id" };
+    }
+    const iface = device.interfaces.find((i) => i.id === cli.ifaceId);
+    if (!iface?.parentIfaceId) {
+      return { output: "% encapsulation only on subinterfaces" };
+    }
+    const parent = device.interfaces.find((i) => i.id === iface.parentIfaceId);
+    const newName = `${parent?.name ?? "If"}.${tag}`;
+    ctx.setState({
+      ...ctx.state,
+      devices: ctx.state.devices.map((d) => {
+        if (d.id !== ctx.deviceId) return d;
+        return {
+          ...d,
+          interfaces: d.interfaces.map((i) =>
+            i.id === cli.ifaceId
+              ? { ...i, vlanTag: tag, accessVlan: tag, name: newName }
+              : i,
+          ),
+        };
+      }),
+    });
     return { output: "" };
   }
 

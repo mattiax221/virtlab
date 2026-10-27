@@ -72,7 +72,9 @@ export function NetworkConnections({
 }) {
   const live =
     stateRef.current.devices.find((d) => d.id === device.id) ?? device;
-  const iface = live.interfaces[0];
+  const adapters = live.interfaces.filter((i) => !i.parentIfaceId);
+  const [ifaceId, setIfaceId] = useState(adapters[0]?.id ?? "");
+  const iface = adapters.find((i) => i.id === ifaceId) ?? adapters[0];
   const linked = Boolean(iface?.connectedLinkId);
 
   const [view, setView] = useState<View>("folder");
@@ -88,18 +90,24 @@ export function NetworkConnections({
   useEffect(() => {
     const d =
       stateRef.current.devices.find((x) => x.id === device.id) ?? device;
-    const i = d.interfaces[0];
+    const list = d.interfaces.filter((i) => !i.parentIfaceId);
+    const i = list.find((x) => x.id === ifaceId) ?? list[0];
+    if (i && i.id !== ifaceId) setIfaceId(i.id);
     setDhcp(!i?.ip);
     setIp(i?.ip ?? "");
     setMask(i?.mask ?? "255.255.255.0");
     setGw(i?.gateway ?? "");
-  }, [device, stateRef, view]);
+  }, [device, stateRef, view, ifaceId]);
 
   const adapterName =
-    device.type === "laptop" ? "Wi-Fi" : "Ethernet";
+    iface?.media === "wireless"
+      ? "Wi-Fi"
+      : iface?.name?.startsWith("Gigabit")
+        ? "Ethernet"
+        : iface?.name ?? "Ethernet";
   const adapterDriver =
-    device.type === "laptop"
-      ? "Realtek 8822CE Wireless LAN 802.11ac PCI-E NIC"
+    iface?.media === "wireless"
+      ? "NetLab Wireless Adapter 802.11n"
       : "NetLab Virtual Ethernet Adapter";
 
   function applyTcpIp() {
@@ -183,32 +191,56 @@ export function NetworkConnections({
             Pannello di controllo ▸ Rete e Internet ▸ Connessioni di rete
           </div>
           <div className="flex-1 p-4">
-            <button
-              type="button"
-              onDoubleClick={() => setView("adapter")}
-              onClick={() => setView("adapter")}
-              className="flex w-44 flex-col items-center gap-1 rounded p-3 text-center hover:bg-[#cce8ff]"
-            >
-              <div className="flex h-14 w-14 items-center justify-center rounded bg-[#0078d4] text-white shadow">
-                <svg viewBox="0 0 24 24" className="h-8 w-8" fill="none" stroke="currentColor" strokeWidth="1.7">
-                  <circle cx="6" cy="12" r="2.2" fill="currentColor" stroke="none" />
-                  <circle cx="18" cy="6" r="2.2" fill="currentColor" stroke="none" />
-                  <circle cx="18" cy="18" r="2.2" fill="currentColor" stroke="none" />
-                  <path d="M8 11.3 L15.6 7.2 M8 12.7 L15.6 16.8" />
-                </svg>
+            {adapters.length === 0 ? (
+              <p className="text-[12px] text-[#666]">
+                Nessuna scheda di rete. Apri <strong>Physical</strong>, spegni il PC e
+                installa Ethernet o Wi‑Fi.
+              </p>
+            ) : (
+              <div className="flex flex-wrap gap-3">
+                {adapters.map((a) => (
+                  <button
+                    key={a.id}
+                    type="button"
+                    onDoubleClick={() => {
+                      setIfaceId(a.id);
+                      setView("adapter");
+                    }}
+                    onClick={() => {
+                      setIfaceId(a.id);
+                      setView("adapter");
+                    }}
+                    className="flex w-40 flex-col items-center gap-1 rounded p-3 text-center hover:bg-[#cce8ff]"
+                  >
+                    <div className="flex h-12 w-12 items-center justify-center rounded bg-[#0078d4] text-white shadow">
+                      {a.media === "wireless" ? (
+                        <span className="text-lg">≈</span>
+                      ) : (
+                        <svg viewBox="0 0 24 24" className="h-7 w-7" fill="none" stroke="currentColor" strokeWidth="1.7">
+                          <circle cx="6" cy="12" r="2.2" fill="currentColor" stroke="none" />
+                          <circle cx="18" cy="6" r="2.2" fill="currentColor" stroke="none" />
+                          <circle cx="18" cy="18" r="2.2" fill="currentColor" stroke="none" />
+                          <path d="M8 11.3 L15.6 7.2 M8 12.7 L15.6 16.8" />
+                        </svg>
+                      )}
+                    </div>
+                    <div className="font-medium">
+                      {a.media === "wireless" ? "Wi-Fi" : "Ethernet"}
+                    </div>
+                    <div
+                      className={`text-[10px] ${a.connectedLinkId ? "text-green-700" : "text-red-700"}`}
+                    >
+                      {a.connectedLinkId ? "Connessa" : "Scollegata"}
+                    </div>
+                    <div className="text-[10px] text-[#666]">
+                      {a.ip ?? "Nessun IP"}
+                    </div>
+                  </button>
+                ))}
               </div>
-              <div className="font-medium">{adapterName}</div>
-              <div className={`text-[10px] ${linked ? "text-green-700" : "text-red-700"}`}>
-                {linked ? "Connessa" : "Cavo di rete scollegato"}
-              </div>
-              <div className="text-[10px] text-[#666]">
-                {iface?.ip ? iface.ip : "Nessun IP"}
-              </div>
-            </button>
+            )}
             <p className="mt-6 max-w-md text-[11px] leading-relaxed text-[#555]">
-              Doppio clic (o un clic) sulla connessione → Proprietà → seleziona{" "}
-              <strong>Protocollo Internet versione 4 (TCP/IPv4)</strong> → Proprietà
-              per impostare l’IP statico come in Windows.
+              Schede da Physical (Ethernet / Wi‑Fi). Poi TCP/IPv4 per l’IP statico.
             </p>
           </div>
         </div>
