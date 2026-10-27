@@ -1,0 +1,48 @@
+@import "tailwindcss";
+
+:root {
+  --lab-bg: #07111f;
+  --lab-panel: #0b1729;
+  --lab-fg: #e2e8f0;
+  --lab-line: #1e293b;
+  --background: var(--lab-bg);
+  --foreground: var(--lab-fg);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-body);
+  --font-mono: var(--font-mono);
+  --font-display: var(--font-display);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-body), system-ui, sans-serif;
+}
+
+.font-display {
+  font-family: var(--font-display), var(--font-body), system-ui, sans-serif;
+}
+
+.lab-grid {
+  background-color: #07111f;
+  background-image:
+    radial-gradient(ellipse 70% 50% at 80% 10%, rgba(14, 165, 233, 0.08), transparent 50%),
+    linear-gradient(rgba(51, 65, 85, 0.35) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(51, 65, 85, 0.35) 1px, transparent 1px);
+  background-size: auto, 28px 28px, 28px 28px;
+}
+
+@keyframes fadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
