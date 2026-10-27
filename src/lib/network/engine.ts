@@ -59,6 +59,22 @@ export function createDevice(
     device.vlans = defaultVlans().filter((v) => v.id === 1);
     device.macTable = [];
   }
+  if (
+    type === "access_point" ||
+    type === "ap_n" ||
+    type === "lap" ||
+    type === "wireless_router" ||
+    type === "home_router"
+  ) {
+    device.wifi = {
+      ssid: `NetLab-${name}`,
+      security: "wpa2",
+      password: "cisco123",
+      channel: 6,
+      enabled: true,
+      band: "2.4",
+    };
+  }
   return device;
 }
 

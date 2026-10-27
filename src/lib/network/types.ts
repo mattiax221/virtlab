@@ -92,6 +92,18 @@ export type InstalledModule = {
   slot: number;
 };
 
+export type WifiSecurity = "open" | "wpa2";
+
+/** Broadcast Wi‑Fi settings on AP / wireless router */
+export type WifiRadio = {
+  ssid: string;
+  security: WifiSecurity;
+  password: string;
+  channel: number;
+  enabled: boolean;
+  band: "2.4" | "5";
+};
+
 export type Device = {
   id: string;
   type: DeviceKind;
@@ -110,6 +122,8 @@ export type Device = {
   slots: number;
   /** Powered on — modules can change when off (PT-style) */
   powered: boolean;
+  /** Wi‑Fi radio (AP / WRT / home router) */
+  wifi?: WifiRadio;
 };
 
 export type Link = {

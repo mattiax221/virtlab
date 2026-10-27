@@ -9,6 +9,7 @@ import type { Device, LabState } from "@/lib/network/types";
 import { NetworkConnections } from "./NetworkConnections";
 import { PhysicalPanel } from "./PhysicalPanel";
 import { Terminal } from "./Terminal";
+import { WifiTray } from "./WifiTray";
 
 type AppWindow = "network" | "cmd" | "physical" | null;
 
@@ -204,7 +205,14 @@ export function WindowsDesktop({
                 Physical
               </div>
             )}
-            <div className="ml-auto pr-2 text-xs text-slate-300">{clock} · Roma</div>
+            <div className="ml-auto flex items-center gap-1 pr-1">
+              <WifiTray
+                device={device}
+                stateRef={stateRef}
+                setState={setState}
+              />
+              <div className="px-2 text-xs text-slate-300">{clock}</div>
+            </div>
           </div>
         </div>
       </div>

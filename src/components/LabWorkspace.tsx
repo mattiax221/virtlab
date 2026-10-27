@@ -24,10 +24,11 @@ import { DeviceIcon } from "./DeviceIcon";
 import { RouterConsole } from "./RouterConsole";
 import { SimpleDevicePanel } from "./SimpleDevicePanel";
 import { SwitchPanel } from "./SwitchPanel";
+import { WifiApPanel } from "./WifiApPanel";
 import { WindowsDesktop } from "./WindowsDesktop";
 
 type Tool = "select" | "cable" | "delete";
-type OpenMode = "sim" | "panel" | "switch" | "router";
+type OpenMode = "sim" | "panel" | "switch" | "router" | "wifi";
 
 type CtxTarget =
   | { kind: "device"; id: string }
@@ -56,10 +57,17 @@ function modeFor(device: Device): OpenMode {
     return "switch";
   }
   if (
+    device.type === "access_point" ||
+    device.type === "ap_n" ||
+    device.type === "lap" ||
+    device.type === "wireless_router" ||
+    device.type === "home_router"
+  ) {
+    return "wifi";
+  }
+  if (
     device.type === "router" ||
     device.type.startsWith("router_") ||
-    device.type === "wireless_router" ||
-    device.type === "home_router" ||
     device.type.startsWith("firewall_") ||
     device.type === "multilayer_switch" ||
     device.type === "wlc"
@@ -697,6 +705,14 @@ export function LabWorkspace() {
       )}
       {openDevice && openMode === "switch" && (
         <SwitchPanel
+          device={openDevice}
+          stateRef={stateRef}
+          setState={setState}
+          onClose={closeOpen}
+        />
+      )}
+      {openDevice && openMode === "wifi" && (
+        <WifiApPanel
           device={openDevice}
           stateRef={stateRef}
           setState={setState}

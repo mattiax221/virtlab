@@ -21,6 +21,7 @@ export type ModuleKind =
   | "host_wifi"
   | "router_fe"
   | "router_ge"
+  | "router_wifi"
   | "router_serial"
   | "switch_base"
   | "switch_uplink_ge"
@@ -88,6 +89,15 @@ export const MODULE_CATALOG: Record<ModuleKind, ModuleDef> = {
     description: "Porta GigabitEthernet router.",
     ports: 1,
     media: "ethernet",
+    fits: ["router"],
+  },
+  router_wifi: {
+    kind: "router_wifi",
+    label: "Wireless radio",
+    ptModel: "WRT-RADIO",
+    description: "Radio Wi‑Fi integrata (SSID broadcast).",
+    ports: 1,
+    media: "wireless",
     fits: ["router"],
   },
   router_serial: {
@@ -222,26 +232,38 @@ export function defaultModulesFor(
       return [{ id: uid("mod"), kind: "host_wifi", slot: 0 }];
     }
     if (type === "analog_phone") return [];
+    // PC / laptop / server: Ethernet + Wi‑Fi (tray networks)
+    if (type === "pc" || type === "laptop" || type === "server") {
+      return [
+        { id: uid("mod"), kind: "host_fe", slot: 0 },
+        { id: uid("mod"), kind: "host_wifi", slot: 1 },
+      ];
+    }
     return [{ id: uid("mod"), kind: "host_fe", slot: 0 }];
   }
   if (fam === "router") {
+    if (type === "wireless_router" || type === "home_router") {
+      // LAN GE ports + dedicated Wi‑Fi radio
+      return [
+        { id: uid("mod"), kind: "router_ge", slot: 0 },
+        { id: uid("mod"), kind: "router_ge", slot: 1 },
+        { id: uid("mod"), kind: "router_ge", slot: 2 },
+        { id: uid("mod"), kind: "router_wifi", slot: 3 },
+      ];
+    }
     const n =
       type === "router_2911" || type === "router_4331"
         ? 3
         : type.startsWith("firewall_")
           ? 3
-          : type === "wireless_router" || type === "home_router"
-            ? 5
-            : 2;
+          : 2;
     const kind: ModuleKind =
       type === "router_1841" || type === "router_2811" || type === "router"
         ? "router_fe"
         : "router_ge";
     return Array.from({ length: Math.min(n, 4) }, (_, i) => ({
       id: uid("mod"),
-      kind: i === 0 && (type === "wireless_router" || type === "home_router")
-        ? "router_ge"
-        : kind,
+      kind,
       slot: i,
     }));
   }
@@ -345,8 +367,11 @@ export function interfacesFromModules(
       else if (def.kind === "host_wifi") name = `Wireless0`;
       else if (def.kind === "router_fe") {
         name = `FastEthernet0/${fe++}`;
-      } else if (def.kind === "router_ge") {
+      }       else if (def.kind === "router_ge") {
         name = `GigabitEthernet0/${gi++}`;
+      } else if (def.kind === "router_wifi") {
+        name = wi === 0 ? "Wireless0" : `Wireless${wi}`;
+        wi++;
       } else if (def.kind === "router_serial") {
         name = `Serial0/${se++}`;
       } else if (def.kind === "switch_base") {
