@@ -11,6 +11,7 @@ import {
   moveDevice,
   nextDeviceName,
 } from "@/lib/network/engine";
+import { CABLE_META, PT_PALETTE, type CableKind } from "@/lib/network/catalog";
 import {
   DEVICE_META,
   isEndHost,
@@ -20,49 +21,13 @@ import {
 } from "@/lib/network/types";
 import { DeviceIcon } from "./DeviceIcon";
 import { HostOpenDialog } from "./HostOpenDialog";
-import { ReactOsSession } from "./ReactOsSession";
 import { RouterConsole } from "./RouterConsole";
 import { SimpleDevicePanel } from "./SimpleDevicePanel";
 import { SwitchPanel } from "./SwitchPanel";
 import { WindowsDesktop } from "./WindowsDesktop";
 
 type Tool = "select" | "cable" | "delete";
-type OpenMode = "chooser" | "sim" | "reactos" | "panel" | "switch" | "router";
-
-const PALETTE: { title: string; types: DeviceKind[] }[] = [
-  {
-    title: "End Devices (PT)",
-    types: ["pc", "laptop", "server", "printer", "ip_phone"],
-  },
-  {
-    title: "Switches / Hub",
-    types: [
-      "hub",
-      "switch",
-      "switch_2950",
-      "switch_2960",
-      "switch_3560",
-      "switch_3650",
-      "multilayer_switch",
-    ],
-  },
-  {
-    title: "Routers / Security",
-    types: [
-      "router",
-      "router_1841",
-      "router_1941",
-      "router_2911",
-      "router_4321",
-      "wireless_router",
-      "firewall_asa",
-    ],
-  },
-  {
-    title: "WAN / Wireless",
-    types: ["modem_dsl", "modem_cable", "cloud", "access_point"],
-  },
-];
+type OpenMode = "chooser" | "sim" | "panel" | "switch" | "router";
 
 export function LabWorkspace() {
   const [state, setState] = useState<LabState>(() => createDemoLab());
@@ -72,6 +37,7 @@ export function LabWorkspace() {
   }, [state]);
 
   const [tool, setTool] = useState<Tool>("select");
+  const [cableKind, setCableKind] = useState<CableKind>("auto");
   const [cableFrom, setCableFrom] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [openDeviceId, setOpenDeviceId] = useState<string | null>(null);
@@ -96,6 +62,8 @@ export function LabWorkspace() {
     if (
       device.type === "switch" ||
       device.type === "hub" ||
+      device.type === "bridge" ||
+      device.type === "repeater" ||
       device.type.startsWith("switch_")
     ) {
       setOpenMode("switch");
@@ -103,8 +71,10 @@ export function LabWorkspace() {
       device.type === "router" ||
       device.type.startsWith("router_") ||
       device.type === "wireless_router" ||
-      device.type === "firewall_asa" ||
-      device.type === "multilayer_switch"
+      device.type === "home_router" ||
+      device.type.startsWith("firewall_") ||
+      device.type === "multilayer_switch" ||
+      device.type === "wlc"
     ) {
       setOpenMode("router");
     } else if (
@@ -151,7 +121,7 @@ export function LabWorkspace() {
         showToast("Cavo: seleziona il secondo dispositivo");
         return;
       }
-      const result = connectDevices(state, cableFrom, device.id);
+      const result = connectDevices(state, cableFrom, device.id, cableKind);
       if (result.error) showToast(result.error);
       else {
         setState(result.state);
@@ -217,6 +187,20 @@ export function LabWorkspace() {
         >
           Cavo
         </ToolButton>
+        {tool === "cable" && (
+          <select
+            value={cableKind}
+            onChange={(e) => setCableKind(e.target.value as CableKind)}
+            className="max-w-[11rem] rounded-md border border-slate-700 bg-slate-900 px-2 py-1.5 text-[11px] text-slate-200"
+            title={CABLE_META[cableKind].hint}
+          >
+            {(Object.keys(CABLE_META) as CableKind[]).map((k) => (
+              <option key={k} value={k}>
+                {CABLE_META[k].label}
+              </option>
+            ))}
+          </select>
+        )}
         <ToolButton
           active={tool === "delete"}
           onClick={() => {
@@ -263,7 +247,7 @@ export function LabWorkspace() {
             Catalogo in stile Packet Tracer (slice 1). Host con OS: PC / Laptop /
             Server → ReactOS. Switch, modem, stampanti = simulati.
           </p>
-          {PALETTE.map((group) => (
+          {PT_PALETTE.map((group) => (
             <div key={group.title} className="mt-3">
               <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
                 {group.title}
@@ -314,12 +298,7 @@ export function LabWorkspace() {
                 const a = state.devices.find((d) => d.id === link.aDeviceId);
                 const b = state.devices.find((d) => d.id === link.bDeviceId);
                 if (!a || !b) return null;
-                const color =
-                  link.media === "serial"
-                    ? "#fbbf24"
-                    : link.media === "wireless"
-                      ? "#a78bfa"
-                      : "#38bdf8";
+                const meta = CABLE_META[link.media] ?? CABLE_META.straight;
                 return (
                   <g key={link.id}>
                     <line
@@ -327,10 +306,10 @@ export function LabWorkspace() {
                       y1={a.y}
                       x2={b.x}
                       y2={b.y}
-                      stroke={color}
+                      stroke={meta.color}
                       strokeWidth="2.5"
                       strokeOpacity="0.85"
-                      strokeDasharray={link.media === "wireless" ? "4 3" : undefined}
+                      strokeDasharray={meta.dash}
                     />
                     {tool === "delete" && (
                       <line
@@ -395,7 +374,6 @@ export function LabWorkspace() {
           device={openDevice}
           onClose={closeOpen}
           onSimulated={() => setOpenMode("sim")}
-          onReactOs={() => setOpenMode("reactos")}
         />
       )}
       {openDevice && openMode === "sim" && (
@@ -405,9 +383,6 @@ export function LabWorkspace() {
           setState={setState}
           onClose={closeOpen}
         />
-      )}
-      {openDevice && openMode === "reactos" && (
-        <ReactOsSession device={openDevice} onClose={closeOpen} />
       )}
       {openDevice && openMode === "router" && (
         <RouterConsole

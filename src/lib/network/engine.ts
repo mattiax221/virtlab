@@ -1,3 +1,4 @@
+import { inferCable, type CableKind } from "./catalog";
 import { formatIp, isValidIp, parseIp, parseMask, randomMac, sameSubnet } from "./ip";
 import {
   DEVICE_META,
@@ -20,8 +21,7 @@ export function uid(prefix: string): string {
 
 function defaultIfaces(type: DeviceKind, deviceId: string): InterfaceConfig[] {
   const meta = DEVICE_META[type];
-  // Cap UI/sim ports: real 24-port switch still works; keep first N usable.
-  const count = Math.min(meta.ports, type.startsWith("switch_") ? 24 : meta.ports);
+  const count = Math.min(meta.ports, 26);
   return Array.from({ length: count }, (_, i) => {
     let name = `Eth${i}`;
     if (
@@ -30,24 +30,43 @@ function defaultIfaces(type: DeviceKind, deviceId: string): InterfaceConfig[] {
       type === "multilayer_switch" ||
       type.startsWith("switch_")
     ) {
-      name = i < 24 ? `FastEthernet0/${i}` : `GigabitEthernet0/${i - 24}`;
-    } else if (
-      type === "router" ||
-      type.startsWith("router_") ||
-      type === "firewall_asa" ||
-      type === "wireless_router"
-    ) {
-      name = `GigabitEthernet0/${i}`;
+      // PT: Fa0/1..Fa0/24 then Gig0/1..
+      if (i < 24) name = `FastEthernet0/${i + 1}`;
+      else name = `GigabitEthernet0/${i - 23}`;
+    } else if (type === "router_1841" || type === "router_2811" || type === "router") {
+      name = `FastEthernet0/${i}`;
+    } else if (type.startsWith("router_") || type === "wireless_router" || type === "home_router") {
+      if (type === "router_4321" || type === "router_4331") {
+        name = `GigabitEthernet0/0/${i}`;
+      } else {
+        name = `GigabitEthernet0/${i}`;
+      }
+    } else if (type.startsWith("firewall_")) {
+      name = `Ethernet0/${i}`;
     } else if (type === "modem_dsl" || type === "modem_cable") {
-      name = i === 0 ? "Ethernet0" : "ATM0";
-    } else if (type === "pc" || type === "laptop" || type === "server" || type === "printer") {
+      name = i === 0 ? "Ethernet0" : type === "modem_cable" ? "Coaxial0" : "Modem0";
+    } else if (
+      type === "pc" ||
+      type === "laptop" ||
+      type === "server" ||
+      type === "printer" ||
+      type === "tablet" ||
+      type === "smartphone" ||
+      type === "tv"
+    ) {
       name = "FastEthernet0";
     } else if (type === "ip_phone") {
       name = i === 0 ? "Switchport" : "PC port";
-    } else if (type === "access_point") {
+    } else if (type === "analog_phone") {
+      name = "Phone0";
+    } else if (type === "access_point" || type === "ap_n" || type === "lap") {
       name = "Port 0";
-    } else if (type === "cloud") {
+    } else if (type === "wlc") {
+      name = `GigabitEthernet0/${i}`;
+    } else if (type === "cloud" || type === "co_server") {
       name = `Ethernet${i}`;
+    } else if (type === "bridge" || type === "repeater") {
+      name = `Port${i}`;
     }
     return {
       id: uid("if"),
@@ -96,20 +115,16 @@ export function createDemoLab(): LabState {
   pc1.interfaces[0].ip = "192.168.1.10";
   pc1.interfaces[0].mask = "255.255.255.0";
   pc1.interfaces[0].gateway = "192.168.1.1";
-
   pc2.interfaces[0].ip = "192.168.1.20";
   pc2.interfaces[0].mask = "255.255.255.0";
   pc2.interfaces[0].gateway = "192.168.1.1";
-
   printer.interfaces[0].ip = "192.168.1.50";
   printer.interfaces[0].mask = "255.255.255.0";
   printer.interfaces[0].gateway = "192.168.1.1";
-
   rtr.interfaces[0].ip = "192.168.1.1";
   rtr.interfaces[0].mask = "255.255.255.0";
   rtr.interfaces[1].ip = "10.0.0.2";
   rtr.interfaces[1].mask = "255.255.255.252";
-
   modem.interfaces[0].ip = "10.0.0.1";
   modem.interfaces[0].mask = "255.255.255.252";
 
@@ -124,13 +139,14 @@ export function createDemoLab(): LabState {
 
   const links: Link[] = [];
   for (const [a, ai, b, bi] of linksSpec) {
+    const media = inferCable(a.type, b.type);
     const link: Link = {
       id: uid("link"),
       aDeviceId: a.id,
       aIfaceId: a.interfaces[ai].id,
       bDeviceId: b.id,
       bIfaceId: b.interfaces[bi].id,
-      media: b.type === "cloud" || a.type === "modem_cable" ? "serial" : "copper",
+      media,
     };
     a.interfaces[ai].connectedLinkId = link.id;
     b.interfaces[bi].connectedLinkId = link.id;
@@ -162,6 +178,7 @@ export function connectDevices(
   state: LabState,
   aId: string,
   bId: string,
+  cable: CableKind = "auto",
 ): { state: LabState; error?: string } {
   if (aId === bId) return { state, error: "Non puoi collegare un dispositivo a se stesso." };
   const a = getDevice(state, aId);
@@ -174,15 +191,7 @@ export function connectDevices(
     return { state, error: "Nessuna porta libera su uno dei due dispositivi." };
   }
 
-  const media: Link["media"] =
-    a.type === "cloud" ||
-    b.type === "cloud" ||
-    a.type.startsWith("modem") ||
-    b.type.startsWith("modem")
-      ? "serial"
-      : a.type === "access_point" || b.type === "access_point"
-        ? "wireless"
-        : "copper";
+  const media = cable === "auto" ? inferCable(a.type, b.type) : cable;
 
   const link: Link = {
     id: uid("link"),
@@ -281,10 +290,7 @@ export function moveDevice(
   };
 }
 
-type Endpoint = {
-  device: Device;
-  iface: InterfaceConfig;
-};
+type Endpoint = { device: Device; iface: InterfaceConfig };
 
 function otherEnd(state: LabState, link: Link, deviceId: string): Endpoint | null {
   const otherDeviceId =
@@ -306,6 +312,8 @@ function neighbors(state: LabState, deviceId: string): Endpoint[] {
     if (!iface.connectedLinkId || !iface.enabled) continue;
     const link = state.links.find((l) => l.id === iface.connectedLinkId);
     if (!link) continue;
+    // Console links don't carry IP traffic
+    if (link.media === "console") continue;
     const end = otherEnd(state, link, deviceId);
     if (end && end.iface.enabled) result.push(end);
   }
@@ -326,9 +334,7 @@ function l2ReachableHosts(state: LabState, startDeviceId: string): Endpoint[] {
 
     if (!isL2Bridge(device.type)) {
       for (const iface of device.interfaces) {
-        if (iface.ip && iface.enabled) {
-          hosts.push({ device, iface });
-        }
+        if (iface.ip && iface.enabled) hosts.push({ device, iface });
       }
     }
 
@@ -347,11 +353,7 @@ function findLocalRoute(device: Device, destIp: string): InterfaceConfig | null 
     if (!iface.ip || !iface.mask || !iface.enabled) continue;
     if (sameSubnet(iface.ip, destIp, iface.mask)) return iface;
   }
-  const gwIface = device.interfaces.find(
-    (i) => i.ip && i.mask && i.gateway && i.enabled,
-  );
-  if (gwIface && gwIface.gateway) return gwIface;
-  return null;
+  return device.interfaces.find((i) => i.ip && i.mask && i.gateway && i.enabled) ?? null;
 }
 
 function collectRouterDomains(state: LabState, router: Device): Endpoint[] {
@@ -360,7 +362,7 @@ function collectRouterDomains(state: LabState, router: Device): Endpoint[] {
   for (const iface of router.interfaces) {
     if (!iface.connectedLinkId || !iface.enabled) continue;
     const link = state.links.find((l) => l.id === iface.connectedLinkId);
-    if (!link) continue;
+    if (!link || link.media === "console") continue;
     const next = otherEnd(state, link, router.id);
     if (!next) continue;
     for (const h of l2ReachableHosts(state, next.device.id)) {
@@ -371,30 +373,9 @@ function collectRouterDomains(state: LabState, router: Device): Endpoint[] {
     }
   }
   for (const iface of router.interfaces) {
-    if (iface.ip && iface.enabled) {
-      found.push({ device: router, iface });
-    }
+    if (iface.ip && iface.enabled) found.push({ device: router, iface });
   }
   return found;
-}
-
-function isL3ReachableViaRouter(
-  state: LabState,
-  router: Device,
-  target: Endpoint,
-): boolean {
-  return collectRouterDomains(state, router).some(
-    (e) => e.iface.ip === target.iface.ip,
-  );
-}
-
-function findIfaceByIp(state: LabState, ip: string): Endpoint | null {
-  for (const device of state.devices) {
-    for (const iface of device.interfaces) {
-      if (iface.ip === ip && iface.enabled) return { device, iface };
-    }
-  }
-  return null;
 }
 
 export function runPing(
@@ -430,7 +411,7 @@ export function runPing(
       targetIp,
       count,
       [],
-      "Richiesta scaduta.\n\nNessun indirizzo IP. Usa: ipconfig /ip <ip> <mask> [gateway]",
+      "Richiesta scaduta.\n\nNessun IP. Usa: ipconfig /ip <ip> <mask> [gateway]",
     );
   }
 
@@ -457,13 +438,7 @@ export function runPing(
     const domain = l2ReachableHosts(state, from.id);
     const target = domain.find((e) => e.iface.ip === targetIp);
     if (!target) {
-      return failPing(
-        fromIp,
-        targetIp,
-        count,
-        hops,
-        "Richiesta scaduta.\n\nHost non in LAN (cavo/switch/IP).",
-      );
+      return failPing(fromIp, targetIp, count, hops, "Host non in LAN.");
     }
     hops.push({
       deviceId: target.device.id,
@@ -483,15 +458,8 @@ export function runPing(
   }
 
   if (!srcIface.gateway) {
-    return failPing(
-      fromIp,
-      targetIp,
-      count,
-      hops,
-      "Fuori rete: configura gateway con ipconfig /ip …",
-    );
+    return failPing(fromIp, targetIp, count, hops, "Fuori rete: serve un gateway.");
   }
-
   if (!sameSubnet(srcIface.ip, srcIface.gateway, srcIface.mask)) {
     return failPing(fromIp, targetIp, count, hops, "Gateway non in subnet.");
   }
@@ -509,20 +477,11 @@ export function runPing(
   });
 
   if (isL3Device(gw.device.type)) {
-    const outIface = findLocalRoute(gw.device, targetIp);
-    if (!outIface || !outIface.connectedLinkId) {
-      // still search all domains
-    }
+    void findLocalRoute;
     const allFromRouter = collectRouterDomains(state, gw.device);
     const found = allFromRouter.find((e) => e.iface.ip === targetIp);
     if (!found) {
-      return failPing(
-        fromIp,
-        targetIp,
-        count,
-        hops,
-        "Nessuna rotta verso la destinazione.",
-      );
+      return failPing(fromIp, targetIp, count, hops, "Nessuna rotta.");
     }
     hops.push({
       deviceId: found.device.id,
@@ -541,8 +500,6 @@ export function runPing(
     };
   }
 
-  void isL3ReachableViaRouter;
-  void findIfaceByIp;
   return failPing(fromIp, targetIp, count, hops, "Richiesta scaduta.");
 }
 
@@ -565,10 +522,7 @@ function failPing(
 }
 
 function buildPingOk(toIp: string, count: number, baseRtt: number): string {
-  const lines: string[] = [
-    "",
-    `Esecuzione di Ping ${toIp} con 32 byte di dati:`,
-  ];
+  const lines = ["", `Esecuzione di Ping ${toIp} con 32 byte di dati:`];
   for (let i = 0; i < count; i++) {
     const rtt = baseRtt + Math.floor(Math.random() * 3);
     lines.push(`Risposta da ${toIp}: byte=32 durata=${rtt}ms TTL=128`);
@@ -578,7 +532,6 @@ function buildPingOk(toIp: string, count: number, baseRtt: number): string {
   lines.push(
     `    Pacchetti: Trasmessi = ${count}, Ricevuti = ${count}, Persi = 0 (0% persi),`,
   );
-  lines.push(`Tempo approssimativo percorsi andata/ritorno in millisecondi:`);
   lines.push(
     `    Minimo = ${baseRtt}ms, Massimo = ${baseRtt + 2}ms, Medio = ${baseRtt + 1}ms`,
   );
@@ -586,26 +539,22 @@ function buildPingOk(toIp: string, count: number, baseRtt: number): string {
 }
 
 export function nextDeviceName(state: LabState, type: DeviceKind): string {
-  let prefix = DEVICE_META[type].label.replace(/\s+/g, "");
-  if (type === "switch" || type.startsWith("switch_") || type === "multilayer_switch") {
-    prefix = "Switch";
-  } else if (type === "router" || type.startsWith("router_")) {
-    prefix = "Router";
-  } else if (type === "firewall_asa") {
-    prefix = "ASA";
-  } else if (type === "wireless_router") {
-    prefix = "WirelessRouter";
-  } else if (type === "hub") {
-    prefix = "Hub";
-  } else if (type === "pc") {
-    prefix = "PC";
-  } else if (type === "laptop") {
-    prefix = "Laptop";
-  } else if (type === "server") {
-    prefix = "Server";
-  } else if (type === "printer") {
-    prefix = "Printer";
-  }
+  let prefix = "Device";
+  if (type === "pc") prefix = "PC";
+  else if (type === "laptop") prefix = "Laptop";
+  else if (type === "server") prefix = "Server";
+  else if (type === "printer") prefix = "Printer";
+  else if (type.startsWith("switch") || type === "multilayer_switch") prefix = "Switch";
+  else if (type.startsWith("router")) prefix = "Router";
+  else if (type.startsWith("firewall")) prefix = "ASA";
+  else if (type === "hub") prefix = "Hub";
+  else if (type === "cloud") prefix = "Cloud";
+  else if (type.startsWith("modem")) prefix = "Modem";
+  else if (type === "wireless_router" || type === "home_router") prefix = "WirelessRouter";
+  else if (type === "access_point" || type === "ap_n") prefix = "AccessPoint";
+  else if (type === "ip_phone") prefix = "IPPhone";
+  else prefix = DEVICE_META[type].label.replace(/[^a-zA-Z0-9]/g, "").slice(0, 12) || "Dev";
+
   let n = 0;
   const names = new Set(state.devices.map((d) => d.name));
   while (names.has(`${prefix}${n}`)) n++;

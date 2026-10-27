@@ -52,6 +52,14 @@ export function DeviceIcon({
           <rect x="24" y="16" width="16" height="10" fill="#c4b5fd" opacity="0.5" />
         </svg>
       );
+    case "tv":
+      return (
+        <svg viewBox="0 0 64 64" className={common} aria-hidden>
+          <rect x="8" y="14" width="48" height="32" rx="2" fill="#0f172a" stroke="#94a3b8" strokeWidth="2" />
+          <rect x="12" y="18" width="40" height="24" fill="#1e293b" />
+          <rect x="26" y="48" width="12" height="4" fill="#64748b" />
+        </svg>
+      );
     case "hub":
     case "switch":
       return (

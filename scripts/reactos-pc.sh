@@ -1,21 +1,20 @@
 #!/usr/bin/env bash
-# Una VM ReactOS per ogni PC del lab (disco dedicato).
-# Solo UNA VM attiva alla volta (RAM limitata, no KVM).
-# IMPORTANTE: IDE + e1000 (ReactOS Live non gestisce bene virtio → schermo nero).
+# ReactOS per host — SOLO utile con KVM/VirtualBox locale.
+# Su Cloud Agent nested-virt: ~1-2 FPS, inutilizzabile per il lab.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 ISO="${NETLAB_REACTOS_ISO:-$ROOT/vm/reactos/live.iso}"
 DISK_DIR="${NETLAB_REACTOS_DISKS:-$ROOT/vm/disks}"
 RUN_DIR="${NETLAB_REACTOS_RUN:-$ROOT/vm/run}"
-VNC_DISPLAY="${NETLAB_REACTOS_VNC_DISPLAY:-2}" # 5900+2 = 5902
+VNC_DISPLAY="${NETLAB_REACTOS_VNC_DISPLAY:-2}"
 RAM_MB="${NETLAB_REACTOS_RAM_MB:-1024}"
 NOVNC_PORT="${NETLAB_NOVNC_PORT:-6080}"
 
 mkdir -p "$DISK_DIR" "$RUN_DIR"
 
 usage() {
-  echo "Uso: $0 start <deviceId> | stop | status | active"
+  echo "Uso: $0 start <deviceId> | stop | status"
   exit 1
 }
 
@@ -33,10 +32,7 @@ stop_all() {
     pid="$(cat "$PID_FILE" || true)"
     if [[ -n "${pid:-}" ]] && kill -0 "$pid" 2>/dev/null; then
       kill "$pid" 2>/dev/null || true
-      for _ in 1 2 3 4 5; do
-        kill -0 "$pid" 2>/dev/null || break
-        sleep 0.4
-      done
+      sleep 0.5
       kill -9 "$pid" 2>/dev/null || true
     fi
     rm -f "$PID_FILE"
@@ -58,7 +54,7 @@ case "$CMD" in
     stop_all
     echo '{"ok":true,"running":false}'
     ;;
-  active|status)
+  status|active)
     running=false
     active=""
     if [[ -f "$PID_FILE" ]]; then
@@ -74,7 +70,8 @@ case "$CMD" in
     if [[ -f "$NOVNC_PID_FILE" ]] && kill -0 "$(cat "$NOVNC_PID_FILE")" 2>/dev/null; then
       novnc=true
     fi
-    echo "{\"ok\":true,\"running\":$running,\"activeDevice\":\"$active\",\"isoPresent\":$iso,\"novnc\":$novnc,\"vncPort\":$((5900 + VNC_DISPLAY)),\"novncPort\":$NOVNC_PORT,\"novncPath\":\"/novnc/vnc_lite.html\"}"
+    # Nested KVM on this cloud image hangs — do not claim kvm:true.
+    echo "{\"ok\":true,\"running\":$running,\"activeDevice\":\"$active\",\"isoPresent\":$iso,\"novnc\":$novnc,\"kvm\":false,\"usableFps\":false,\"vncPort\":$((5900 + VNC_DISPLAY)),\"novncPort\":$NOVNC_PORT,\"novncPath\":\"/novnc/vnc_lite.html\",\"note\":\"ReactOS needs local KVM/VirtualBox for 20-30+ FPS\"}"
     ;;
   start)
     [[ -n "$DEVICE_ID" ]] || usage
@@ -87,16 +84,13 @@ case "$CMD" in
     if [[ ! -f "$disk" ]]; then
       qemu-img create -f qcow2 "$disk" 8G >/dev/null
     fi
-    ACCEL=(-cpu qemu64)
-    if [[ -r /dev/kvm ]]; then
-      ACCEL=(-enable-kvm -cpu host)
-    fi
-
-    # IDE + e1000: ReactOS Live 0.4.14 si blocca/nero con virtio
+    # Force TCG here: nested KVM hangs on this host.
     qemu-system-x86_64 \
-      "${ACCEL[@]}" \
+      -accel tcg,thread=multi \
+      -cpu qemu64 \
       -m "$RAM_MB" \
-      -smp 1 \
+      -smp 2 \
+      -usb -device usb-tablet \
       -drive "file=$disk,if=ide,index=0,media=disk" \
       -drive "file=$ISO,if=ide,index=1,media=cdrom,readonly=on" \
       -boot order=d \
@@ -111,12 +105,10 @@ case "$CMD" in
       -daemonize
 
     echo "$DEVICE_ID" > "$ACTIVE_FILE"
-
     websockify --web /usr/share/novnc "$NOVNC_PORT" "127.0.0.1:$((5900 + VNC_DISPLAY))" \
       >/tmp/netlab-websockify.log 2>&1 &
     echo $! > "$NOVNC_PID_FILE"
-
-    echo "{\"ok\":true,\"running\":true,\"activeDevice\":\"$DEVICE_ID\",\"novncPort\":$NOVNC_PORT,\"vncPort\":$((5900 + VNC_DISPLAY)),\"novncPath\":\"/novnc/vnc_lite.html\"}"
+    echo "{\"ok\":true,\"running\":true,\"activeDevice\":\"$DEVICE_ID\",\"kvm\":false,\"usableFps\":false,\"note\":\"Use simulated desktop for lab; ReactOS is demo-only here\"}"
     ;;
   *)
     usage
