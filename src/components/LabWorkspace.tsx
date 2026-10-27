@@ -25,6 +25,7 @@ import {
 import { ContextMenu, type MenuItem } from "./ContextMenu";
 import { DeviceIcon } from "./DeviceIcon";
 import { ExercisesPanel } from "./ExercisesPanel";
+import { PortPicker } from "./PortPicker";
 import { RouterConsole } from "./RouterConsole";
 import { SimOverlay } from "./SimOverlay";
 import { SimpleDevicePanel } from "./SimpleDevicePanel";
@@ -33,6 +34,13 @@ import { WifiApPanel } from "./WifiApPanel";
 import { WindowsDesktop } from "./WindowsDesktop";
 
 type Tool = "select" | "cable" | "delete" | "simulate";
+
+/** Collegamento in corso stile Packet Tracer (scelta porta) */
+type CableDraft = {
+  fromDeviceId: string;
+  fromIfaceId: string | null;
+  toDeviceId: string | null;
+};
 type OpenMode = "sim" | "panel" | "switch" | "router" | "wifi";
 
 type CtxTarget =
@@ -99,7 +107,7 @@ export function LabWorkspace() {
 
   const [tool, setTool] = useState<Tool>("select");
   const [cableKind, setCableKind] = useState<CableKind>("auto");
-  const [cableFrom, setCableFrom] = useState<string | null>(null);
+  const [cableDraft, setCableDraft] = useState<CableDraft | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [openDeviceId, setOpenDeviceId] = useState<string | null>(null);
   const [openMode, setOpenMode] = useState<OpenMode | null>(null);
@@ -168,17 +176,26 @@ export function LabWorkspace() {
         return { ...s, devices: [...s.devices, device] };
       });
       setTool("select");
-      setCableFrom(null);
+      setCableDraft(null);
     },
     [showToast],
   );
 
+  const cancelCable = useCallback(() => {
+    setCableDraft(null);
+    setTool("select");
+  }, []);
+
   const startCableFrom = useCallback(
     (deviceId: string) => {
       setTool("cable");
-      setCableFrom(deviceId);
+      setCableDraft({
+        fromDeviceId: deviceId,
+        fromIfaceId: null,
+        toDeviceId: null,
+      });
       setSelectedId(deviceId);
-      showToast("Seleziona il secondo dispositivo");
+      showToast("Scegli la porta sul primo dispositivo");
     },
     [showToast],
   );
@@ -213,21 +230,40 @@ export function LabWorkspace() {
       return;
     }
     if (tool === "cable") {
-      if (!cableFrom) {
-        setCableFrom(device.id);
+      // 1) primo device → picker porta
+      if (!cableDraft) {
+        setCableDraft({
+          fromDeviceId: device.id,
+          fromIfaceId: null,
+          toDeviceId: null,
+        });
         setSelectedId(device.id);
-        showToast("Seleziona il secondo dispositivo");
+        showToast("Scegli la porta");
         return;
       }
-      if (cableFrom === device.id) return;
-      const result = connectDevices(state, cableFrom, device.id, cableKind);
-      if (result.error) showToast(result.error);
-      else {
-        setState(result.state);
-        showToast("Cavo collegato");
+      // ancora in attesa della porta del primo
+      if (!cableDraft.fromIfaceId) {
+        if (cableDraft.fromDeviceId !== device.id) {
+          setCableDraft({
+            fromDeviceId: device.id,
+            fromIfaceId: null,
+            toDeviceId: null,
+          });
+          setSelectedId(device.id);
+        }
+        return;
       }
-      setCableFrom(null);
-      setTool("select");
+      // 2) secondo device → picker porta
+      if (cableDraft.fromDeviceId === device.id) {
+        showToast("Scegli un altro dispositivo");
+        return;
+      }
+      setCableDraft({
+        ...cableDraft,
+        toDeviceId: device.id,
+      });
+      setSelectedId(device.id);
+      showToast("Scegli la porta di destinazione");
       return;
     }
     setSelectedId(device.id);
@@ -375,7 +411,7 @@ export function LabWorkspace() {
         label: "Seleziona",
         onClick: () => {
           setTool("select");
-          setCableFrom(null);
+          setCableDraft(null);
         },
       },
       {
@@ -383,7 +419,7 @@ export function LabWorkspace() {
         label: "Cavo",
         onClick: () => {
           setTool("cable");
-          setCableFrom(null);
+          setCableDraft(null);
         },
       },
     ];
@@ -402,7 +438,7 @@ export function LabWorkspace() {
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") {
         setCtx(null);
-        setCableFrom(null);
+        setCableDraft(null);
         setInspectId(null);
         if (tool === "cable" || tool === "delete") setTool("select");
       }
@@ -445,7 +481,7 @@ export function LabWorkspace() {
           active={tool === "select"}
           onClick={() => {
             setTool("select");
-            setCableFrom(null);
+            setCableDraft(null);
             setSimFrom(null);
           }}
         >
@@ -455,8 +491,9 @@ export function LabWorkspace() {
           active={tool === "cable"}
           onClick={() => {
             setTool("cable");
-            setCableFrom(null);
+            setCableDraft(null);
             setSimFrom(null);
+            showToast("Cavo: clicca un device e scegli la porta");
           }}
         >
           Cavo
@@ -479,7 +516,7 @@ export function LabWorkspace() {
           active={tool === "delete"}
           onClick={() => {
             setTool("delete");
-            setCableFrom(null);
+            setCableDraft(null);
             setSimFrom(null);
           }}
         >
@@ -489,7 +526,7 @@ export function LabWorkspace() {
           active={tool === "simulate"}
           onClick={() => {
             setTool("simulate");
-            setCableFrom(null);
+            setCableDraft(null);
             setSimFrom(null);
             showToast("Simulation: clicca sorgente poi destinazione");
           }}
@@ -498,9 +535,15 @@ export function LabWorkspace() {
         </ToolButton>
 
         <div className="ml-auto flex items-center gap-2">
-          {(cableFrom || simFrom) && (
+          {(cableDraft || simFrom) && (
             <span className="hidden text-[11px] text-amber-300/90 sm:inline">
-              {simFrom ? "Sim… destinazione" : "Cavo in corso…"}
+              {simFrom
+                ? "Sim… destinazione"
+                : !cableDraft?.fromIfaceId
+                  ? "Cavo… scegli porta 1"
+                  : !cableDraft?.toDeviceId
+                    ? "Cavo… clicca device 2"
+                    : "Cavo… scegli porta 2"}
             </span>
           )}
           <ToolButton
@@ -573,6 +616,12 @@ export function LabWorkspace() {
               const b = state.devices.find((d) => d.id === link.bDeviceId);
               if (!a || !b) return null;
               const meta = CABLE_META[link.media] ?? CABLE_META.straight;
+              const aIf = a.interfaces.find((i) => i.id === link.aIfaceId);
+              const bIf = b.interfaces.find((i) => i.id === link.bIfaceId);
+              const ax = a.x + (b.x - a.x) * 0.18;
+              const ay = a.y + (b.y - a.y) * 0.18;
+              const bx = a.x + (b.x - a.x) * 0.82;
+              const by = a.y + (b.y - a.y) * 0.82;
               return (
                 <g key={link.id} style={{ pointerEvents: "stroke" }}>
                   <line
@@ -608,9 +657,36 @@ export function LabWorkspace() {
                       if (tool === "delete") {
                         setState((s) => deleteLink(s, link.id));
                         showToast("Cavo rimosso");
+                      } else {
+                        showToast(
+                          `${a.name} ${aIf?.name ?? "?"} ↔ ${b.name} ${bIf?.name ?? "?"}`,
+                        );
                       }
                     }}
                   />
+                  {aIf && (
+                    <text
+                      x={ax}
+                      y={ay - 6}
+                      textAnchor="middle"
+                      className="fill-slate-400"
+                      style={{ fontSize: 9, pointerEvents: "none" }}
+                    >
+                      {aIf.name.replace("FastEthernet", "Fa").replace("GigabitEthernet", "Gi")}
+                    </text>
+                  )}
+                  {bIf && (
+                    <text
+                      x={bx}
+                      y={by - 6}
+                      textAnchor="middle"
+                      className="fill-slate-400"
+                      style={{ fontSize: 9, pointerEvents: "none" }}
+                    >
+                      {bIf.name.replace("FastEthernet", "Fa").replace("GigabitEthernet", "Gi")}
+                    </text>
+                  )}
+                  <title>{`${a.name}:${aIf?.name} ↔ ${b.name}:${bIf?.name}`}</title>
                 </g>
               );
             })}
@@ -631,7 +707,8 @@ export function LabWorkspace() {
               type="button"
               className={`absolute flex w-[5.5rem] -translate-x-1/2 -translate-y-1/2 flex-col items-center gap-0.5 rounded-lg p-1.5 transition ${
                 selectedId === device.id ||
-                cableFrom === device.id ||
+                cableDraft?.fromDeviceId === device.id ||
+                cableDraft?.toDeviceId === device.id ||
                 simFrom === device.id
                   ? "bg-sky-500/20 ring-2 ring-sky-400"
                   : "hover:bg-white/5"
@@ -846,6 +923,57 @@ export function LabWorkspace() {
       )}
       {openDevice && openMode === "panel" && (
         <SimpleDevicePanel device={openDevice} onClose={closeOpen} />
+      )}
+
+      {cableDraft && !cableDraft.fromIfaceId && (
+        <PortPicker
+          device={
+            state.devices.find((d) => d.id === cableDraft.fromDeviceId)!
+          }
+          title="Collega cavo — porta di partenza"
+          onCancel={cancelCable}
+          onPick={(ifaceId) => {
+            setCableDraft({
+              ...cableDraft,
+              fromIfaceId: ifaceId,
+            });
+            showToast("Ora clicca il secondo dispositivo");
+          }}
+        />
+      )}
+      {cableDraft?.fromIfaceId && cableDraft.toDeviceId && (
+        <PortPicker
+          device={state.devices.find((d) => d.id === cableDraft.toDeviceId)!}
+          title="Collega cavo — porta di arrivo"
+          onCancel={cancelCable}
+          onPick={(ifaceId) => {
+            const result = connectDevices(
+              state,
+              cableDraft.fromDeviceId,
+              cableDraft.toDeviceId!,
+              cableKind,
+              {
+                aIfaceId: cableDraft.fromIfaceId!,
+                bIfaceId: ifaceId,
+              },
+            );
+            if (result.error) {
+              showToast(result.error);
+              return;
+            }
+            const a = state.devices.find((d) => d.id === cableDraft.fromDeviceId);
+            const b = state.devices.find((d) => d.id === cableDraft.toDeviceId);
+            const aName =
+              a?.interfaces.find((i) => i.id === cableDraft.fromIfaceId)?.name ??
+              "?";
+            const bName =
+              b?.interfaces.find((i) => i.id === ifaceId)?.name ?? "?";
+            setState(result.state);
+            setCableDraft(null);
+            setTool("select");
+            showToast(`Collegato ${a?.name}.${aName} ↔ ${b?.name}.${bName}`);
+          }}
+        />
       )}
     </div>
   );

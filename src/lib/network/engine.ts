@@ -388,48 +388,87 @@ function ifaceLinkCompatible(
   return null;
 }
 
+export function freePhysicalPorts(device: Device): InterfaceConfig[] {
+  return device.interfaces.filter(
+    (i) => !i.connectedLinkId && !i.parentIfaceId && i.enabled,
+  );
+}
+
 export function connectDevices(
   state: LabState,
   aId: string,
   bId: string,
   cable: CableKind = "auto",
+  opts?: { aIfaceId?: string; bIfaceId?: string },
 ): { state: LabState; error?: string } {
   if (aId === bId) return { state, error: "Non puoi collegare un dispositivo a se stesso." };
   const a = getDevice(state, aId);
   const b = getDevice(state, bId);
   if (!a || !b) return { state, error: "Dispositivo non trovato." };
 
-  // Prefer matching media when auto (e.g. wifi↔ap)
-  const aFree = a.interfaces.filter((i) => !i.connectedLinkId && !i.parentIfaceId && i.enabled);
-  const bFree = b.interfaces.filter((i) => !i.connectedLinkId && !i.parentIfaceId && i.enabled);
+  const aFree = freePhysicalPorts(a);
+  const bFree = freePhysicalPorts(b);
   if (!aFree.length || !bFree.length) {
     return { state, error: "Nessuna porta libera su uno dei due dispositivi." };
   }
 
   let media = cable === "auto" ? inferCable(a.type, b.type) : cable;
-  let aIf = aFree[0];
-  let bIf = bFree[0];
-  if (cable === "auto" || cable === "wireless") {
-    const aw = aFree.find((i) => i.media === "wireless");
-    const bw = bFree.find((i) => i.media === "wireless");
-    if (aw && bw) {
-      aIf = aw;
-      bIf = bw;
-      media = "wireless";
-    } else if (aw) {
-      aIf = aw;
-      media = "wireless";
-    } else if (bw) {
-      bIf = bw;
-      media = "wireless";
+  let aIf =
+    (opts?.aIfaceId
+      ? a.interfaces.find((i) => i.id === opts.aIfaceId)
+      : undefined) ?? aFree[0];
+  let bIf =
+    (opts?.bIfaceId
+      ? b.interfaces.find((i) => i.id === opts.bIfaceId)
+      : undefined) ?? bFree[0];
+
+  if (opts?.aIfaceId) {
+    if (!aIf || aIf.connectedLinkId || aIf.parentIfaceId || !aIf.enabled) {
+      return { state, error: "Porta sorgente non disponibile." };
     }
   }
-  if (cable === "serial" || media === "serial") {
-    const as = aFree.find((i) => i.media === "serial");
-    const bs = bFree.find((i) => i.media === "serial");
-    if (as) aIf = as;
-    if (bs) bIf = bs;
-    if (as || bs) media = "serial";
+  if (opts?.bIfaceId) {
+    if (!bIf || bIf.connectedLinkId || bIf.parentIfaceId || !bIf.enabled) {
+      return { state, error: "Porta destinazione non disponibile." };
+    }
+  }
+
+  // Auto-pick matching media only when ports were not chosen explicitly
+  if (!opts?.aIfaceId && !opts?.bIfaceId) {
+    if (cable === "auto" || cable === "wireless") {
+      const aw = aFree.find((i) => i.media === "wireless");
+      const bw = bFree.find((i) => i.media === "wireless");
+      if (aw && bw) {
+        aIf = aw;
+        bIf = bw;
+        media = "wireless";
+      } else if (aw) {
+        aIf = aw;
+        media = "wireless";
+      } else if (bw) {
+        bIf = bw;
+        media = "wireless";
+      }
+    }
+    if (cable === "serial" || media === "serial") {
+      const as = aFree.find((i) => i.media === "serial");
+      const bs = bFree.find((i) => i.media === "serial");
+      if (as) aIf = as;
+      if (bs) bIf = bs;
+      if (as || bs) media = "serial";
+    }
+  } else {
+    // Infer media from chosen ports when cable is auto
+    if (cable === "auto") {
+      if (aIf.media === "serial" || bIf.media === "serial") media = "serial";
+      else if (aIf.media === "wireless" || bIf.media === "wireless")
+        media = "wireless";
+      else if (aIf.media === "fiber" || bIf.media === "fiber") media = "fiber";
+      else if (aIf.media === "coaxial" || bIf.media === "coaxial")
+        media = "coaxial";
+      else if (aIf.media === "phone" || bIf.media === "phone") media = "phone";
+      else media = inferCable(a.type, b.type);
+    }
   }
 
   const compat = ifaceLinkCompatible(aIf, bIf, media);
