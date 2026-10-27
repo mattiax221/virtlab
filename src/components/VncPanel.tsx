@@ -3,11 +3,14 @@
 import { useCallback, useEffect, useState } from "react";
 
 type Status = {
-  isoPresent: boolean;
-  diskPresent: boolean;
-  vncUp: boolean;
-  novncUp: boolean;
-  message: string;
+  ok?: boolean;
+  running?: boolean;
+  activeDevice?: string;
+  isoPresent?: boolean;
+  novnc?: boolean;
+  vncPort?: number;
+  novncPort?: number;
+  error?: string;
 };
 
 export function VncPanel() {
@@ -16,12 +19,11 @@ export function VncPanel() {
 
   const refresh = useCallback(async () => {
     try {
-      const res = await fetch("/api/vnc-status", { cache: "no-store" });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const res = await fetch("/api/reactos", { cache: "no-store" });
       setStatus(await res.json());
       setError(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Errore di stato");
+      setError(e instanceof Error ? e.message : "Errore");
     }
   }, []);
 
@@ -31,58 +33,30 @@ export function VncPanel() {
     return () => window.clearInterval(id);
   }, [refresh]);
 
-  const novncUrl =
-    typeof window !== "undefined"
-      ? `${window.location.protocol}//${window.location.hostname}:6080/vnc.html?autoconnect=1&resize=scale`
-      : "http://127.0.0.1:6080/vnc.html";
+  const host =
+    typeof window !== "undefined" ? window.location.hostname : "127.0.0.1";
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-4">
-      <div className="rounded-lg border border-amber-500/30 bg-amber-950/30 p-4 text-sm leading-relaxed text-amber-100/90">
-        <p className="font-medium text-amber-200">Licenza</p>
-        <p className="mt-1 text-slate-300">
-          Non avviamo Windows pirata o “senza licenza”. Serve un ISO{" "}
-          <strong className="text-slate-100">Evaluation Microsoft</strong> (prova
-          ufficiale) oppure un ISO che possiedi già legalmente. Mettilo in{" "}
-          <code className="text-sky-300">vm/windows.iso</code> e avvia gli script.
+      <div className="rounded-lg border border-orange-500/30 bg-orange-950/20 p-4 text-sm text-slate-300">
+        <p className="font-medium text-orange-200">ReactOS per ogni PC</p>
+        <p className="mt-1">
+          OS open-source gratis. Dal lab: doppio clic su PC → ReactOS. Una VM
+          attiva alla volta; ogni host ha disco{" "}
+          <code className="text-sky-300">vm/disks/&lt;id&gt;.qcow2</code>. Per
+          ping tra PC usa il desktop simulato con IP statico.
         </p>
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2">
-        <Stat
-          ok={status?.isoPresent}
-          label="ISO Windows"
-          detail="vm/windows.iso"
-        />
-        <Stat
-          ok={status?.diskPresent}
-          label="Disco VM"
-          detail="vm/windows.qcow2"
-        />
-        <Stat ok={status?.vncUp} label="QEMU VNC" detail="porta 5901" />
-        <Stat ok={status?.novncUp} label="noVNC web" detail="porta 6080" />
+        <Stat ok={status?.isoPresent} label="ISO ReactOS" detail="vm/reactos/live.iso" />
+        <Stat ok={status?.running} label="VM attiva" detail={status?.activeDevice || "nessuna"} />
+        <Stat ok={status?.novnc} label="noVNC" detail={`porta ${status?.novncPort ?? 6080}`} />
+        <Stat ok={!!status?.running} label="VNC QEMU" detail={`porta ${status?.vncPort ?? 5902}`} />
       </div>
 
-      {error && (
-        <p className="text-sm text-rose-300">Stato non leggibile: {error}</p>
-      )}
-      {status && (
-        <p className="text-sm text-slate-400">{status.message}</p>
-      )}
-
-      <ol className="list-decimal space-y-1 pl-5 text-sm text-slate-400">
-        <li>
-          Scarica Windows Evaluation dal Microsoft Evaluation Center e salvalo
-          come <code className="text-sky-300">vm/windows.iso</code>
-        </li>
-        <li>
-          <code className="text-sky-300">./scripts/start-windows-vm.sh</code>
-        </li>
-        <li>
-          <code className="text-sky-300">./scripts/start-novnc.sh</code>
-        </li>
-        <li>Apri la console sotto (o il link noVNC)</li>
-      </ol>
+      {error && <p className="text-sm text-rose-300">{error}</p>}
+      {status?.error && <p className="text-sm text-rose-300">{status.error}</p>}
 
       <div className="flex flex-wrap gap-2">
         <button
@@ -90,10 +64,24 @@ export function VncPanel() {
           onClick={() => void refresh()}
           className="rounded-md bg-slate-800 px-3 py-2 text-sm hover:bg-slate-700"
         >
-          Aggiorna stato
+          Aggiorna
+        </button>
+        <button
+          type="button"
+          onClick={async () => {
+            await fetch("/api/reactos", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ action: "stop" }),
+            });
+            void refresh();
+          }}
+          className="rounded-md bg-rose-800 px-3 py-2 text-sm hover:bg-rose-700"
+        >
+          Stop VM
         </button>
         <a
-          href={novncUrl}
+          href={`http://${host}:6080/vnc.html?autoconnect=1`}
           target="_blank"
           rel="noreferrer"
           className="rounded-md bg-sky-600 px-3 py-2 text-sm font-medium text-slate-950 hover:bg-sky-500"
@@ -103,16 +91,15 @@ export function VncPanel() {
       </div>
 
       <div className="min-h-[420px] flex-1 overflow-hidden rounded-lg border border-slate-700 bg-black">
-        {status?.novncUp ? (
+        {status?.novnc ? (
           <iframe
-            title="noVNC Windows"
-            src={`http://${typeof window !== "undefined" ? window.location.hostname : "127.0.0.1"}:6080/vnc_lite.html?autoconnect=1`}
+            title="ReactOS noVNC"
+            src={`http://${host}:6080/vnc_lite.html?autoconnect=1`}
             className="h-full min-h-[420px] w-full border-0"
           />
         ) : (
           <div className="flex h-full min-h-[420px] items-center justify-center p-6 text-center text-sm text-slate-500">
-            noVNC non è in ascolto. Quando la VM e websockify sono attivi, il
-            desktop Windows compare qui.
+            Nessuna sessione ReactOS. Aprila da un PC nel lab.
           </div>
         )}
       </div>

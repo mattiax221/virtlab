@@ -11,13 +11,42 @@ import {
   moveDevice,
   nextDeviceName,
 } from "@/lib/network/engine";
-import type { Device, DeviceType, LabState } from "@/lib/network/types";
+import {
+  DEVICE_META,
+  isEndHost,
+  type Device,
+  type DeviceKind,
+  type LabState,
+} from "@/lib/network/types";
 import { DeviceIcon } from "./DeviceIcon";
+import { HostOpenDialog } from "./HostOpenDialog";
+import { ReactOsSession } from "./ReactOsSession";
 import { RouterConsole } from "./RouterConsole";
+import { SimpleDevicePanel } from "./SimpleDevicePanel";
 import { SwitchPanel } from "./SwitchPanel";
 import { WindowsDesktop } from "./WindowsDesktop";
 
 type Tool = "select" | "cable" | "delete";
+type OpenMode = "chooser" | "sim" | "reactos" | "panel" | "switch" | "router";
+
+const PALETTE: { title: string; types: DeviceKind[] }[] = [
+  {
+    title: "End devices",
+    types: ["pc", "laptop", "server", "printer", "ip_phone"],
+  },
+  {
+    title: "Switch / Hub",
+    types: ["hub", "switch", "multilayer_switch"],
+  },
+  {
+    title: "Router / Security",
+    types: ["router", "wireless_router", "firewall"],
+  },
+  {
+    title: "WAN / Wireless",
+    types: ["modem_dsl", "modem_cable", "cloud", "access_point"],
+  },
+];
 
 export function LabWorkspace() {
   const [state, setState] = useState<LabState>(() => createDemoLab());
@@ -30,12 +59,11 @@ export function LabWorkspace() {
   const [cableFrom, setCableFrom] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [openDeviceId, setOpenDeviceId] = useState<string | null>(null);
+  const [openMode, setOpenMode] = useState<OpenMode | null>(null);
   const [toast, setToast] = useState<string | null>(null);
-  const [drag, setDrag] = useState<{
-    id: string;
-    ox: number;
-    oy: number;
-  } | null>(null);
+  const [drag, setDrag] = useState<{ id: string; ox: number; oy: number } | null>(
+    null,
+  );
 
   const canvasRef = useRef<HTMLDivElement>(null);
 
@@ -46,22 +74,52 @@ export function LabWorkspace() {
 
   const openDevice = state.devices.find((d) => d.id === openDeviceId) ?? null;
 
-  function addDevice(type: DeviceType) {
-    const name = nextDeviceName(state, type);
-    const device = createDevice(type, name, 180 + Math.random() * 320, 140 + Math.random() * 220);
-    setState((s) => ({ ...s, devices: [...s.devices, device] }));
-    setTool("select");
-    showToast(`Aggiunto ${name}. Doppio clic per aprire.`);
+  function openDeviceUi(device: Device) {
+    setOpenDeviceId(device.id);
+    setSelectedId(device.id);
+    if (device.type === "switch" || device.type === "hub") {
+      setOpenMode("switch");
+    } else if (
+      device.type === "router" ||
+      device.type === "wireless_router" ||
+      device.type === "firewall" ||
+      device.type === "multilayer_switch"
+    ) {
+      setOpenMode("router");
+    } else if (
+      device.type === "pc" ||
+      device.type === "laptop" ||
+      device.type === "server"
+    ) {
+      setOpenMode("chooser");
+    } else {
+      setOpenMode("panel");
+    }
   }
 
-  function onDevicePointerDown(
-    e: React.PointerEvent,
-    device: Device,
-  ) {
+  function closeOpen() {
+    setOpenDeviceId(null);
+    setOpenMode(null);
+  }
+
+  function addDevice(type: DeviceKind) {
+    const name = nextDeviceName(state, type);
+    const device = createDevice(
+      type,
+      name,
+      160 + Math.random() * 360,
+      120 + Math.random() * 240,
+    );
+    setState((s) => ({ ...s, devices: [...s.devices, device] }));
+    setTool("select");
+    showToast(`Aggiunto ${name}`);
+  }
+
+  function onDevicePointerDown(e: React.PointerEvent, device: Device) {
     e.stopPropagation();
     if (tool === "delete") {
       setState((s) => deleteDevice(s, device.id));
-      if (openDeviceId === device.id) setOpenDeviceId(null);
+      if (openDeviceId === device.id) closeOpen();
       showToast(`Eliminato ${device.name}`);
       return;
     }
@@ -69,7 +127,7 @@ export function LabWorkspace() {
       if (!cableFrom) {
         setCableFrom(device.id);
         setSelectedId(device.id);
-        showToast(`Cavo: seleziona il secondo dispositivo`);
+        showToast("Cavo: seleziona il secondo dispositivo");
         return;
       }
       const result = connectDevices(state, cableFrom, device.id);
@@ -101,68 +159,65 @@ export function LabWorkspace() {
     setState((s) => moveDevice(s, drag.id, x, y));
   }
 
-  function onCanvasPointerUp() {
-    setDrag(null);
-  }
-
-  function linkPath(linkId: string) {
-    const link = state.links.find((l) => l.id === linkId);
-    if (!link) return null;
-    const a = state.devices.find((d) => d.id === link.aDeviceId);
-    const b = state.devices.find((d) => d.id === link.bDeviceId);
-    if (!a || !b) return null;
-    return { a, b, link };
-  }
-
   return (
     <div className="flex min-h-screen flex-col bg-[var(--lab-bg)] text-[var(--lab-fg)]">
-      <header className="relative z-20 flex flex-wrap items-center gap-3 border-b border-[var(--lab-line)] bg-[var(--lab-panel)]/95 px-3 py-2 backdrop-blur sm:px-4">
-        <div className="mr-2 flex items-center gap-2">
-          <a
-            href="/"
-            className="flex h-8 w-8 items-center justify-center rounded bg-sky-600 font-display text-sm font-bold text-white"
-            title="Torna alla home"
-          >
-            NL
-          </a>
-          <div>
-            <div className="font-display text-base font-semibold tracking-tight">
-              NetLab
-            </div>
-            <div className="text-[11px] text-slate-400">
-              Lab di rete · comandi reali, non bottoni magici
-            </div>
+      <header className="relative z-20 flex flex-wrap items-center gap-2 border-b border-[var(--lab-line)] bg-[var(--lab-panel)]/95 px-3 py-2 backdrop-blur sm:gap-3 sm:px-4">
+        <a
+          href="/"
+          className="flex h-8 w-8 items-center justify-center rounded bg-sky-600 font-display text-sm font-bold text-white"
+          title="Home"
+        >
+          NL
+        </a>
+        <div className="mr-1">
+          <div className="font-display text-base font-semibold tracking-tight">
+            NetLab
+          </div>
+          <div className="text-[11px] text-slate-400">
+            Packet Tracer–like · ReactOS per host · resto simulato
           </div>
         </div>
 
-        <ToolButton active={tool === "select"} onClick={() => { setTool("select"); setCableFrom(null); }}>
+        <ToolButton
+          active={tool === "select"}
+          onClick={() => {
+            setTool("select");
+            setCableFrom(null);
+          }}
+        >
           Seleziona
         </ToolButton>
-        <ToolButton active={tool === "cable"} onClick={() => { setTool("cable"); setCableFrom(null); }}>
+        <ToolButton
+          active={tool === "cable"}
+          onClick={() => {
+            setTool("cable");
+            setCableFrom(null);
+          }}
+        >
           Cavo
         </ToolButton>
-        <ToolButton active={tool === "delete"} onClick={() => { setTool("delete"); setCableFrom(null); }}>
+        <ToolButton
+          active={tool === "delete"}
+          onClick={() => {
+            setTool("delete");
+            setCableFrom(null);
+          }}
+        >
           Elimina
         </ToolButton>
-
-        <div className="mx-1 hidden h-6 w-px bg-slate-700 sm:block" />
-
-        <ToolButton onClick={() => addDevice("pc")}>+ PC</ToolButton>
-        <ToolButton onClick={() => addDevice("switch")}>+ Switch</ToolButton>
-        <ToolButton onClick={() => addDevice("router")}>+ Router</ToolButton>
 
         <div className="ml-auto flex flex-wrap gap-2">
           <a
             href="/vnc"
             className="rounded-md bg-orange-700/90 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-orange-600 sm:text-sm"
           >
-            Windows VNC
+            ReactOS / VNC
           </a>
           <ToolButton
             onClick={() => {
               setState(createDemoLab());
-              setOpenDeviceId(null);
-              showToast("Lab demo ricaricato");
+              closeOpen();
+              showToast("Demo LAN ricaricata");
             }}
           >
             Demo LAN
@@ -170,7 +225,7 @@ export function LabWorkspace() {
           <ToolButton
             onClick={() => {
               setState(createEmptyLab());
-              setOpenDeviceId(null);
+              closeOpen();
             }}
           >
             Svuota
@@ -179,27 +234,42 @@ export function LabWorkspace() {
       </header>
 
       <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
-        <aside className="border-b border-[var(--lab-line)] bg-[var(--lab-panel)] p-3 lg:w-64 lg:border-b-0 lg:border-r">
+        <aside className="max-h-[40vh] overflow-y-auto border-b border-[var(--lab-line)] bg-[var(--lab-panel)] p-3 lg:max-h-none lg:w-72 lg:border-b-0 lg:border-r">
           <h2 className="font-display text-sm font-semibold text-sky-200">
-            Come si usa
+            Dispositivi
           </h2>
-          <ol className="mt-2 space-y-2 text-xs leading-relaxed text-slate-400">
-            <li>1. Trascina i dispositivi sul foglio.</li>
-            <li>2. Attiva <strong className="text-slate-200">Cavo</strong> e collega PC ↔ Switch ↔ Router.</li>
-            <li>3. Doppio clic su un <strong className="text-slate-200">PC</strong>: si apre un desktop Windows con CMD.</li>
-            <li>4. Configura con <code className="text-sky-300">ipconfig /ip ...</code> e prova <code className="text-sky-300">ping</code>.</li>
-            <li>5. Sul router: CLI stile Cisco (<code className="text-orange-300">enable</code>, <code className="text-orange-300">interface</code>, <code className="text-orange-300">ip address</code>).</li>
-          </ol>
-          <div className="mt-4 rounded border border-sky-500/20 bg-sky-950/40 p-3 text-xs text-sky-100/80">
-            <p className="font-medium text-sky-200">Perché non è Packet Tracer “finto”</p>
-            <p className="mt-1 text-slate-400">
-              Non c’è un pulsante “Assegna IP”. Apri il PC e digiti i comandi come su un sistema reale. La rete sotto è una simulazione L2/L3 (non una VM Windows con licenza).
-            </p>
-          </div>
+          <p className="mt-1 text-[11px] leading-relaxed text-slate-500">
+            Catalogo in stile Packet Tracer (slice 1). Host con OS: PC / Laptop /
+            Server → ReactOS. Switch, modem, stampanti = simulati.
+          </p>
+          {PALETTE.map((group) => (
+            <div key={group.title} className="mt-3">
+              <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                {group.title}
+              </div>
+              <div className="grid grid-cols-2 gap-1.5">
+                {group.types.map((type) => (
+                  <button
+                    key={type}
+                    type="button"
+                    onClick={() => addDevice(type)}
+                    className="flex items-center gap-1.5 rounded border border-slate-700/80 bg-slate-950/40 px-1.5 py-1.5 text-left text-[11px] text-slate-200 hover:border-sky-500/50 hover:bg-slate-800/60"
+                  >
+                    <DeviceIcon type={type} className="h-7 w-7 shrink-0" />
+                    <span className="leading-tight">{DEVICE_META[type].label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+
           {selectedId && (
             <SelectedInfo
               device={state.devices.find((d) => d.id === selectedId)}
-              onOpen={() => setOpenDeviceId(selectedId)}
+              onOpen={() => {
+                const d = state.devices.find((x) => x.id === selectedId);
+                if (d) openDeviceUi(d);
+              }}
             />
           )}
         </aside>
@@ -209,32 +279,40 @@ export function LabWorkspace() {
             ref={canvasRef}
             className="lab-grid absolute inset-0 overflow-hidden"
             onPointerMove={onCanvasPointerMove}
-            onPointerUp={onCanvasPointerUp}
-            onPointerLeave={onCanvasPointerUp}
+            onPointerUp={() => setDrag(null)}
+            onPointerLeave={() => setDrag(null)}
             onClick={() => {
               if (tool === "select") setSelectedId(null);
             }}
           >
-            <svg className="absolute inset-0 h-full w-full pointer-events-none">
+            <svg className="pointer-events-none absolute inset-0 h-full w-full">
               {state.links.map((link) => {
-                const geo = linkPath(link.id);
-                if (!geo) return null;
+                const a = state.devices.find((d) => d.id === link.aDeviceId);
+                const b = state.devices.find((d) => d.id === link.bDeviceId);
+                if (!a || !b) return null;
+                const color =
+                  link.media === "serial"
+                    ? "#fbbf24"
+                    : link.media === "wireless"
+                      ? "#a78bfa"
+                      : "#38bdf8";
                 return (
                   <g key={link.id}>
                     <line
-                      x1={geo.a.x}
-                      y1={geo.a.y}
-                      x2={geo.b.x}
-                      y2={geo.b.y}
-                      stroke="#38bdf8"
+                      x1={a.x}
+                      y1={a.y}
+                      x2={b.x}
+                      y2={b.y}
+                      stroke={color}
                       strokeWidth="2.5"
                       strokeOpacity="0.85"
+                      strokeDasharray={link.media === "wireless" ? "4 3" : undefined}
                     />
                     <line
-                      x1={geo.a.x}
-                      y1={geo.a.y}
-                      x2={geo.b.x}
-                      y2={geo.b.y}
+                      x1={a.x}
+                      y1={a.y}
+                      x2={b.x}
+                      y2={b.y}
                       stroke="transparent"
                       strokeWidth="14"
                       className="pointer-events-auto cursor-pointer"
@@ -249,9 +327,6 @@ export function LabWorkspace() {
                   </g>
                 );
               })}
-              {tool === "cable" && cableFrom && (
-                <CableHint devices={state.devices} fromId={cableFrom} />
-              )}
             </svg>
 
             {state.devices.map((device) => (
@@ -267,29 +342,20 @@ export function LabWorkspace() {
                 onPointerDown={(e) => onDevicePointerDown(e, device)}
                 onDoubleClick={(e) => {
                   e.stopPropagation();
-                  setOpenDeviceId(device.id);
-                  setSelectedId(device.id);
+                  openDeviceUi(device);
                 }}
               >
                 <DeviceIcon type={device.type} className="h-12 w-12 drop-shadow-lg" />
                 <span className="rounded bg-slate-950/70 px-1.5 py-0.5 text-[11px] font-medium text-slate-100">
                   {device.name}
                 </span>
-                {device.interfaces[0]?.ip && device.type !== "switch" && (
+                {device.interfaces[0]?.ip && isEndHost(device.type) && (
                   <span className="text-[10px] text-sky-300/90">
                     {device.interfaces[0].ip}
                   </span>
                 )}
               </button>
             ))}
-
-            {state.devices.length === 0 && (
-              <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-                <p className="max-w-sm text-center text-sm text-slate-500">
-                  Foglio vuoto. Aggiungi un PC, uno switch e collega i cavi.
-                </p>
-              </div>
-            )}
           </div>
 
           {toast && (
@@ -300,24 +366,38 @@ export function LabWorkspace() {
         </main>
       </div>
 
-      {openDevice?.type === "pc" && (
+      {openDevice && openMode === "chooser" && (
+        <HostOpenDialog
+          device={openDevice}
+          onClose={closeOpen}
+          onSimulated={() => setOpenMode("sim")}
+          onReactOs={() => setOpenMode("reactos")}
+        />
+      )}
+      {openDevice && openMode === "sim" && (
         <WindowsDesktop
           device={openDevice}
           stateRef={stateRef}
           setState={setState}
-          onClose={() => setOpenDeviceId(null)}
+          onClose={closeOpen}
         />
       )}
-      {openDevice?.type === "router" && (
+      {openDevice && openMode === "reactos" && (
+        <ReactOsSession device={openDevice} onClose={closeOpen} />
+      )}
+      {openDevice && openMode === "router" && (
         <RouterConsole
           device={openDevice}
           stateRef={stateRef}
           setState={setState}
-          onClose={() => setOpenDeviceId(null)}
+          onClose={closeOpen}
         />
       )}
-      {openDevice?.type === "switch" && (
-        <SwitchPanel device={openDevice} onClose={() => setOpenDeviceId(null)} />
+      {openDevice && openMode === "switch" && (
+        <SwitchPanel device={openDevice} onClose={closeOpen} />
+      )}
+      {openDevice && openMode === "panel" && (
+        <SimpleDevicePanel device={openDevice} onClose={closeOpen} />
       )}
     </div>
   );
@@ -358,45 +438,17 @@ function SelectedInfo({
   return (
     <div className="mt-4 rounded border border-slate-700 bg-slate-950/50 p-3 text-xs">
       <div className="font-medium text-slate-200">{device.name}</div>
-      <div className="mt-1 capitalize text-slate-500">{device.type}</div>
-      {device.interfaces
-        .filter((i) => i.ip || i.connectedLinkId)
-        .slice(0, 4)
-        .map((i) => (
-          <div key={i.id} className="mt-1 font-mono text-[11px] text-slate-400">
-            {i.name}: {i.ip ?? "no ip"} {i.connectedLinkId ? "· up" : "· down"}
-          </div>
-        ))}
+      <div className="mt-1 text-slate-500">{DEVICE_META[device.type].label}</div>
+      {device.osSlot && (
+        <div className="mt-1 text-orange-300/90">ReactOS slot: {device.osSlot}</div>
+      )}
       <button
         type="button"
         onClick={onOpen}
         className="mt-3 w-full rounded bg-sky-700 py-1.5 text-slate-50 hover:bg-sky-600"
       >
-        Apri console / desktop
+        Apri
       </button>
     </div>
   );
 }
-
-function CableHint({
-  devices,
-  fromId,
-}: {
-  devices: Device[];
-  fromId: string;
-}) {
-  const from = devices.find((d) => d.id === fromId);
-  if (!from) return null;
-  return (
-    <circle
-      cx={from.x}
-      cy={from.y}
-      r="28"
-      fill="none"
-      stroke="#38bdf8"
-      strokeDasharray="4 4"
-      className="animate-pulse"
-    />
-  );
-}
-

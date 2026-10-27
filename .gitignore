@@ -42,9 +42,13 @@ next-env.d.ts
 netlab_landing.webp
 *.webp
 
-# VM artifacts (ISO / disco Windows — non committare)
-/vm/*.iso
-/vm/*.qcow2
-/vm/*.img
+# VM artifacts (ISO / dischi — non committare)
+/vm/**/*.iso
+/vm/**/*.qcow2
+/vm/**/*.img
+/vm/disks/
+/vm/run/
+/tmp/
 !/vm/README.md
 !/vm/.gitkeep
+!/vm/reactos/.gitkeep

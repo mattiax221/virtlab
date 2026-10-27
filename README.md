@@ -1,38 +1,32 @@
 # NetLab
 
-Laboratorio di rete nel browser: topologia stile Packet Tracer, ma quando apri un PC entri in un **desktop Windows simulato** e usi il **Prompt dei comandi** (`ipconfig`, `ping`, `arp`, `route print`) invece di form e bottoni.
+Laboratorio stile **Cisco Packet Tracer** nel browser:
 
-## Cosa fa
+- topologia con tanti dispositivi (PC, laptop, server, stampante, IP phone, hub, switch L2/L3, router, Wi‑Fi, modem DSL/Cable, cloud, AP, firewall)
+- cavi e ping L2/L3
+- **PC / Laptop / Server**: desktop simulato (IP statico + comandi) **oppure** **ReactOS** reale via VNC (un disco per host)
+- altri dispositivi: simulati (come in Packet Tracer)
 
-- Dispositivi: PC, Switch, Router
-- Collegamenti a cavo sulla topologia
-- Motore L2/L3 semplificato (LAN, gateway, ping)
-- Desktop Windows + CMD sul PC
-- CLI stile Cisco sul router (`enable`, `configure terminal`, `ip address`, …)
-
-## Cosa non è (ancora)
-
-Non è una VM Windows reale (QEMU/Hyper-V + licenza Microsoft). La rete e i comandi sono simulati in modo coerente a scopo didattico. Un passo successivo può collegare console/noVNC a macchine virtuali vere.
-
-## Avvio locale (sul tuo PC)
-
-Il link `127.0.0.1` funziona **solo sulla macchina dove gira** `npm run dev`.
-Se apri Chrome sul PC mentre il server è solo sulla VM Cloud Agent, ottieni `ERR_CONNECTION_REFUSED`.
+## Avvio
 
 ```bash
 npm install
 npm run dev
 ```
 
-Poi apri [http://127.0.0.1:43127](http://127.0.0.1:43127) **su quel stesso PC**.
+Apri [http://127.0.0.1:43127/lab](http://127.0.0.1:43127/lab).
 
-## Percorso consigliato
+In Cloud Agent, `127.0.0.1` dal Chrome del tuo PC non funziona: serve tunnel o `npm run dev` in locale.
 
-1. Dalla home clicca **Apri il laboratorio** (oppure apri `/lab` — c’è già una demo LAN).
-2. Doppio clic su **PC0** → digita `ipconfig`, poi `ping 192.168.1.20`.
-3. Prova a scollegare un cavo (strumento Elimina sul cavo) e ripeti il ping.
-4. Sul router: doppio clic → `enable` → `show ip interface brief`.
+## ReactOS (gratis)
 
-## Stack
+```bash
+# ISO in vm/reactos/live.iso
+./scripts/reactos-pc.sh status
+```
 
-Next.js, TypeScript, Tailwind CSS. Tutta la simulazione gira nel client.
+Dal lab: doppio clic su un PC → **ReactOS reale (VNC)**.
+
+## Cosa non è (ancora)
+
+Parità totale con Packet Tracer (tutti i moduli, IoT, activity wizard, …) è un percorso a slice. Questo repo parte dal core reti + catalogo dispositivi + OS per host.

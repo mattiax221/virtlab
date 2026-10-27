@@ -26,16 +26,13 @@ export default function Home() {
           NetLab
         </p>
         <h1 className="mt-4 max-w-2xl font-display text-2xl font-medium leading-snug text-sky-100/90 sm:text-3xl animate-[fadeUp_0.7s_ease_0.12s_both]">
-          Impara le reti come si fanno davvero: topologia, cavi, e il prompt dei
-          comandi.
+          Packet Tracer–like: topologia completa, IP statico, ReactOS su ogni PC.
         </h1>
         <p className="mt-4 max-w-xl text-base leading-relaxed text-slate-400 animate-[fadeUp_0.7s_ease_0.2s_both]">
-          Come Packet Tracer per lo schema, ma quando apri un PC entri in un
-          desktop Windows simulato e digiti{" "}
-          <span className="text-sky-300">ipconfig</span>,{" "}
-          <span className="text-sky-300">ping</span>,{" "}
-          <span className="text-sky-300">arp</span> — non clicchi un form
-          “Assegna IP”.
+          Switch, modem, stampanti e cloud sono simulati. PC / laptop / server
+          hanno desktop di rete (comandi veri) e possono aprire{" "}
+          <span className="text-orange-300">ReactOS</span> gratis, ciascuno col
+          proprio disco.
         </p>
         <div className="mt-8 flex flex-wrap gap-3 animate-[fadeUp_0.7s_ease_0.28s_both]">
           <Link
@@ -44,26 +41,12 @@ export default function Home() {
           >
             Apri il laboratorio
           </Link>
-          <a
-            href="#limiti"
+          <Link
+            href="/vnc"
             className="rounded-md border border-slate-600 px-5 py-3 text-sm text-slate-300 transition hover:border-slate-400"
           >
-            Cosa è reale e cosa no
-          </a>
-        </div>
-
-        <div
-          id="limiti"
-          className="mt-16 max-w-2xl border-t border-slate-700/80 pt-6 text-sm leading-relaxed text-slate-400 animate-[fadeUp_0.7s_ease_0.35s_both]"
-        >
-          <p className="font-medium text-slate-200">Trasparenza</p>
-          <p className="mt-2">
-            Una VM Windows vera (QEMU/Hyper-V + licenza Microsoft) si può
-            collegare in un secondo passo, ma pesa giga di immagini e richiede
-            infrastruttura. Qui la rete L2/L3 è simulata in modo coerente e
-            l’interazione sul PC è un desktop/CMD fedeli ai comandi reali — così
-            impari il funzionamento, non l’interfaccia a bottoni.
-          </p>
+            Stato ReactOS / VNC
+          </Link>
         </div>
       </div>
     </div>

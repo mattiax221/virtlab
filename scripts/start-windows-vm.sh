@@ -7,7 +7,8 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 VM_DIR="${NETLAB_VM_DIR:-$ROOT/vm}"
 DISK="$VM_DIR/windows.qcow2"
 ISO="$VM_DIR/windows.iso"
-VNC_PORT="${NETLAB_VNC_PORT:-5901}"
+# 5901 is often già usato dal desktop Cloud Agent — Windows usa 5902
+VNC_PORT="${NETLAB_VNC_PORT:-5902}"
 RAM_MB="${NETLAB_VM_RAM_MB:-3072}"
 CPUS="${NETLAB_VM_CPUS:-2}"
 

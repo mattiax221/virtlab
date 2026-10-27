@@ -1,32 +1,34 @@
-# Windows reale via VNC (QEMU + noVNC)
+# OS reali (ReactOS) + dispositivi simulati
 
-## Licenza
+## Modello NetLab (allineato al lab Packet Tracer)
 
-Qui si usa solo Windows **legittimo**:
+| Componente | Modalità |
+|---|---|
+| PC / Laptop / Server | **ReactOS** (OS gratis open-source) — un disco per ogni host |
+| Stampanti, IP phone, hub, switch, router, modem, cloud, AP, firewall | **Simulati** (rete L2/L3 nel browser) |
 
-- [Windows Enterprise Evaluation](https://www.microsoft.com/evalcenter) (periodo di prova Microsoft), oppure
-- un ISO che possiedi già con licenza valida
+IP statico per la topologia lab: apri l’host → **Desktop simulato** → `ipconfig /ip …` poi `ping`.
 
-**Non** supportiamo ISO crackate, activator o “Windows senza licenza”.
-Un Windows non attivato in prova può mostrare watermark e scade: non è lo stesso di una copia pirata.
+ReactOS: OS vero via VNC; **una sola VM attiva alla volta** (RAM / no KVM). Ogni PC ha comunque il suo file disco `vm/disks/<deviceId>.qcow2`.
 
-## Setup
+## ReactOS ISO
 
-1. Metti l’ISO qui come `vm/windows.iso` (il file è in `.gitignore`).
-2. Avvia la VM:
+Metti l’ISO live come:
 
-```bash
-chmod +x scripts/start-windows-vm.sh scripts/start-novnc.sh
-./scripts/start-windows-vm.sh
+```text
+vm/reactos/live.iso
 ```
 
-3. In un altro terminale:
+(già scaricabile dagli script di setup / SourceForge ReactOS 0.4.14 Live)
 
 ```bash
-./scripts/start-novnc.sh
+./scripts/reactos-pc.sh start <deviceId>
+./scripts/reactos-pc.sh stop
+./scripts/reactos-pc.sh status
 ```
 
-4. Apri nel browser: `http://127.0.0.1:6080/vnc.html`  
-   (in Cloud Agent serve un tunnel anche su quella porta, come per NetLab).
+noVNC: porta **6080** · VNC QEMU: **5902**
 
-Installazione Windows nella VM: segui il setup Microsoft a schermo (lingua, partizioni, account locale).
+## Nota licenze
+
+ReactOS è libero. Windows Microsoft non è “free”: Evaluation a tempo oppure licenza. NetLab usa ReactOS per gli host.

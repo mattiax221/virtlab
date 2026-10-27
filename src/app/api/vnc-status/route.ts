@@ -23,7 +23,7 @@ export async function GET() {
   const isoPresent = existsSync(join(root, "vm", "windows.iso"));
   const diskPresent = existsSync(join(root, "vm", "windows.qcow2"));
   const [vncUp, novncUp] = await Promise.all([
-    portOpen(5901),
+    portOpen(5902),
     portOpen(6080),
   ]);
 
