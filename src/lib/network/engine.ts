@@ -368,14 +368,13 @@ function ifaceLinkCompatible(
   b: InterfaceConfig,
   media: CableKind,
 ): string | null {
-  if (media === "wireless") {
-    if (a.media !== "wireless" && b.media !== "wireless") {
-      return "Associazione wireless: serve almeno una porta Wi‑Fi.";
+  // Wireless association requires Wi‑Fi on BOTH ends (PC↔AP), never copper to switch
+  if (media === "wireless" || a.media === "wireless" || b.media === "wireless") {
+    if (a.media !== "wireless" || b.media !== "wireless") {
+      return "Wi‑Fi solo tra due porte wireless (es. PC ↔ Access Point). Per lo switch usa Ethernet.";
     }
-  }
-  if (a.media === "wireless" || b.media === "wireless") {
     if (media !== "wireless" && media !== "auto") {
-      return "Porta Wi‑Fi: usa cavo/associazione Wireless.";
+      return "Porta Wi‑Fi: usa associazione Wireless.";
     }
   }
   if (
@@ -384,6 +383,12 @@ function ifaceLinkCompatible(
     media !== "auto"
   ) {
     return "Porte seriali richiedono cavo Serial.";
+  }
+  if (a.media === "serial" && b.media !== "serial") {
+    return "Serial va collegata a un’altra porta Serial.";
+  }
+  if (b.media === "serial" && a.media !== "serial") {
+    return "Serial va collegata a un’altra porta Serial.";
   }
   return null;
 }
@@ -435,33 +440,41 @@ export function connectDevices(
 
   // Auto-pick matching media only when ports were not chosen explicitly
   if (!opts?.aIfaceId && !opts?.bIfaceId) {
-    if (cable === "auto" || cable === "wireless") {
-      const aw = aFree.find((i) => i.media === "wireless");
-      const bw = bFree.find((i) => i.media === "wireless");
-      if (aw && bw) {
-        aIf = aw;
-        bIf = bw;
-        media = "wireless";
-      } else if (aw) {
-        aIf = aw;
-        media = "wireless";
-      } else if (bw) {
-        bIf = bw;
-        media = "wireless";
+    // Prefer copper/ethernet for normal LAN; wireless ONLY if both ends are Wi‑Fi
+    const aw = aFree.find((i) => i.media === "wireless");
+    const bw = bFree.find((i) => i.media === "wireless");
+    const ae = aFree.find(
+      (i) => i.media === "ethernet" || i.media === "fiber",
+    );
+    const be = bFree.find(
+      (i) => i.media === "ethernet" || i.media === "fiber",
+    );
+    if (cable === "wireless") {
+      if (!aw || !bw) {
+        return { state, error: "Associazione Wi‑Fi: servono porte wireless su entrambi." };
       }
-    }
-    if (cable === "serial" || media === "serial") {
+      aIf = aw;
+      bIf = bw;
+      media = "wireless";
+    } else if (cable === "serial" || media === "serial") {
       const as = aFree.find((i) => i.media === "serial");
       const bs = bFree.find((i) => i.media === "serial");
       if (as) aIf = as;
       if (bs) bIf = bs;
       if (as || bs) media = "serial";
+    } else if (cable === "auto" && aw && bw && !ae && !be) {
+      aIf = aw;
+      bIf = bw;
+      media = "wireless";
+    } else {
+      if (ae) aIf = ae;
+      if (be) bIf = be;
     }
   } else {
     // Infer media from chosen ports when cable is auto
     if (cable === "auto") {
       if (aIf.media === "serial" || bIf.media === "serial") media = "serial";
-      else if (aIf.media === "wireless" || bIf.media === "wireless")
+      else if (aIf.media === "wireless" && bIf.media === "wireless")
         media = "wireless";
       else if (aIf.media === "fiber" || bIf.media === "fiber") media = "fiber";
       else if (aIf.media === "coaxial" || bIf.media === "coaxial")
@@ -606,6 +619,38 @@ export function moveDevice(
 
 type Endpoint = { device: Device; iface: InterfaceConfig };
 
+/** Choose the NIC that should originate traffic toward targetIp. */
+function pickSourceIface(
+  device: Device,
+  targetIp: string,
+): InterfaceConfig | null {
+  const withIp = device.interfaces.filter(
+    (i) => i.ip && i.mask && i.enabled && !i.parentIfaceId,
+  );
+  // 1) Connected iface whose subnet contains the target
+  const connectedInSubnet = withIp.find(
+    (i) =>
+      i.connectedLinkId &&
+      i.ip &&
+      i.mask &&
+      sameSubnet(i.ip, targetIp, i.mask),
+  );
+  if (connectedInSubnet) return connectedInSubnet;
+  // 2) Any connected iface with IP (ethernet preferred)
+  const connectedEth = withIp.find(
+    (i) => i.connectedLinkId && (i.media === "ethernet" || i.media === "fiber"),
+  );
+  if (connectedEth) return connectedEth;
+  const connectedAny = withIp.find((i) => i.connectedLinkId);
+  if (connectedAny) return connectedAny;
+  // 3) Subnet match even if unplugged (so we can give a clear error)
+  const subnetMatch = withIp.find(
+    (i) => i.ip && i.mask && sameSubnet(i.ip, targetIp, i.mask),
+  );
+  if (subnetMatch) return subnetMatch;
+  return withIp[0] ?? null;
+}
+
 function findLocalRoute(device: Device, destIp: string): InterfaceConfig | null {
   for (const iface of device.interfaces) {
     if (!iface.ip || !iface.mask || !iface.enabled) continue;
@@ -725,8 +770,11 @@ export function runPing(
     targetIp = resolved;
   }
 
+  // Prefer a connected iface that can reach the target subnet
   const srcIface =
-    from.interfaces.find((i) => i.ip && i.enabled) ?? from.interfaces[0];
+    pickSourceIface(from, targetIp) ??
+    from.interfaces.find((i) => i.ip && i.enabled) ??
+    from.interfaces[0];
   const fromIp = srcIface?.ip ?? "";
 
   if (!srcIface?.ip || !srcIface.mask) {
@@ -737,7 +785,19 @@ export function runPing(
         targetIp,
         count,
         [],
-        "Richiesta scaduta.\n\nNessun IP. Usa: ipconfig /ip <ip> <mask> [gateway]",
+        "Richiesta scaduta.\n\nNessun IP. Configura Ethernet (non Wi‑Fi) con ipconfig /ip oppure Connessioni di rete.",
+      ),
+    };
+  }
+  if (!srcIface.connectedLinkId) {
+    return {
+      state,
+      result: failPing(
+        fromIp,
+        targetIp,
+        count,
+        [],
+        `Richiesta scaduta.\n\nL'IP ${fromIp} è su ${srcIface.name} ma quella porta non ha un cavo.\nCollega Ethernet allo switch (non la porta Wi‑Fi) e riprova.`,
       ),
     };
   }
@@ -766,12 +826,6 @@ export function runPing(
   let nextState = flood.state;
 
   if (sameSubnet(srcIface.ip, targetIp, srcIface.mask)) {
-    if (!srcIface.connectedLinkId) {
-      return {
-        state: nextState,
-        result: failPing(fromIp, targetIp, count, hops, "Cavo non collegato."),
-      };
-    }
     // Serial same-subnet: need clock on DCE
     if (srcIface.media === "serial") {
       const link = nextState.links.find((l) => l.id === srcIface.connectedLinkId);

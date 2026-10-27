@@ -32,13 +32,24 @@ export function PortPicker({
   title,
   onPick,
   onCancel,
+  /** When connecting the second end, only allow matching media */
+  peerMedia,
+  cableHint,
 }: {
   device: Device;
   title: string;
   onPick: (ifaceId: string) => void;
   onCancel: () => void;
+  peerMedia?: InterfaceConfig["media"] | null;
+  cableHint?: string;
 }) {
-  const ports = device.interfaces.filter((i) => !i.parentIfaceId);
+  const ports = [...device.interfaces.filter((i) => !i.parentIfaceId)].sort(
+    (a, b) => {
+      const rank = (m: InterfaceConfig["media"]) =>
+        m === "ethernet" || m === "fiber" ? 0 : m === "serial" ? 1 : 2;
+      return rank(a.media) - rank(b.media) || a.name.localeCompare(b.name);
+    },
+  );
   const free = ports.filter((i) => !i.connectedLinkId && i.enabled);
 
   return (
@@ -66,6 +77,12 @@ export function PortPicker({
           </button>
         </div>
 
+        {cableHint && (
+          <div className="border-b border-amber-500/30 bg-amber-950/40 px-4 py-2 text-[11px] text-amber-100">
+            {cableHint}
+          </div>
+        )}
+
         <div className="max-h-[min(360px,50vh)] overflow-y-auto p-2">
           {ports.length === 0 && (
             <p className="px-3 py-6 text-center text-sm text-slate-500">
@@ -74,7 +91,18 @@ export function PortPicker({
           )}
           {ports.map((iface) => {
             const status = portStatus(iface);
-            const available = status === "libera";
+            const mediaMismatch =
+              peerMedia != null &&
+              ((peerMedia === "wireless" && iface.media !== "wireless") ||
+                (peerMedia !== "wireless" && iface.media === "wireless") ||
+                (peerMedia === "serial" && iface.media !== "serial") ||
+                (iface.media === "serial" && peerMedia !== "serial"));
+            const available = status === "libera" && !mediaMismatch;
+            const note = mediaMismatch
+              ? peerMedia === "wireless"
+                ? "serve Wi‑Fi"
+                : "usa Ethernet (non Wi‑Fi)"
+              : status;
             return (
               <button
                 key={iface.id}
@@ -107,7 +135,7 @@ export function PortPicker({
                   </span>
                 </span>
                 <span className="shrink-0 text-[11px] uppercase tracking-wide text-slate-500">
-                  {status}
+                  {note}
                 </span>
               </button>
             );
@@ -117,7 +145,7 @@ export function PortPicker({
         <div className="flex items-center justify-between border-t border-slate-800 px-4 py-2 text-[11px] text-slate-500">
           <span>
             {free.length} porta{free.length === 1 ? "" : "e"} libera
-            {free.length === 1 ? "" : "e"}
+            {free.length === 1 ? "" : "e"} · per PC↔Switch scegli Ethernet
           </span>
           <button
             type="button"

@@ -931,6 +931,7 @@ export function LabWorkspace() {
             state.devices.find((d) => d.id === cableDraft.fromDeviceId)!
           }
           title="Collega cavo — porta di partenza"
+          cableHint="PC ↔ Switch: scegli FastEthernet/GigabitEthernet (non Wi‑Fi)."
           onCancel={cancelCable}
           onPick={(ifaceId) => {
             setCableDraft({
@@ -945,6 +946,12 @@ export function LabWorkspace() {
         <PortPicker
           device={state.devices.find((d) => d.id === cableDraft.toDeviceId)!}
           title="Collega cavo — porta di arrivo"
+          peerMedia={
+            state.devices
+              .find((d) => d.id === cableDraft.fromDeviceId)
+              ?.interfaces.find((i) => i.id === cableDraft.fromIfaceId)?.media
+          }
+          cableHint="La porta deve essere compatibile con quella di partenza (Ethernet↔Ethernet, Wi‑Fi↔Wi‑Fi)."
           onCancel={cancelCable}
           onPick={(ifaceId) => {
             const result = connectDevices(

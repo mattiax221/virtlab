@@ -74,7 +74,15 @@ export function NetworkConnections({
   const live =
     stateRef.current.devices.find((d) => d.id === device.id) ?? device;
   const adapters = live.interfaces.filter((i) => !i.parentIfaceId);
-  const [ifaceId, setIfaceId] = useState(adapters[0]?.id ?? "");
+  const defaultAdapter =
+    adapters.find(
+      (i) =>
+        i.connectedLinkId &&
+        (i.media === "ethernet" || i.media === "fiber"),
+    ) ??
+    adapters.find((i) => i.media === "ethernet" || i.media === "fiber") ??
+    adapters[0];
+  const [ifaceId, setIfaceId] = useState(defaultAdapter?.id ?? "");
   const iface = adapters.find((i) => i.id === ifaceId) ?? adapters[0];
   const linked = Boolean(iface?.connectedLinkId);
 

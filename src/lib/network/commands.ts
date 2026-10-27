@@ -110,6 +110,28 @@ function ipconfig(state: LabState, deviceId: string, all: boolean): string {
   return lines.join("\n");
 }
 
+function preferredHostIface(device: NonNullable<ReturnType<typeof getDevice>>) {
+  // Prefer the plugged Ethernet NIC (PC↔Switch), never the idle Wi‑Fi by default
+  return (
+    device.interfaces.find(
+      (i) =>
+        !i.parentIfaceId &&
+        i.enabled &&
+        i.connectedLinkId &&
+        (i.media === "ethernet" || i.media === "fiber"),
+    ) ??
+    device.interfaces.find(
+      (i) =>
+        !i.parentIfaceId &&
+        i.enabled &&
+        (i.media === "ethernet" || i.media === "fiber"),
+    ) ??
+    device.interfaces.find((i) => !i.parentIfaceId && i.connectedLinkId) ??
+    device.interfaces.find((i) => !i.parentIfaceId) ??
+    device.interfaces[0]
+  );
+}
+
 function setIp(
   ctx: CommandContext,
   ip: string,
@@ -122,7 +144,7 @@ function setIp(
 
   const device = getDevice(ctx.state, ctx.deviceId);
   if (!device) return "Dispositivo non trovato.";
-  const iface = device.interfaces[0];
+  const iface = preferredHostIface(device);
   if (!iface) return "Nessuna interfaccia.";
 
   ctx.setState(
@@ -130,17 +152,26 @@ function setIp(
       ip,
       mask,
       gateway: gateway ?? iface.gateway,
+      dhcpClient: false,
     }),
   );
 
   const cidr = maskToCidr(mask);
+  const warn = !iface.connectedLinkId
+    ? "\nAttenzione: questa porta non ha un cavo collegato."
+    : iface.media === "wireless"
+      ? "\nNota: IP sulla Wi‑Fi — per lo switch usa Ethernet."
+      : "";
   return [
     "Configurazione IP aggiornata.",
     `  Interfaccia : ${iface.name}`,
     `  Indirizzo   : ${ip}/${cidr ?? "?"}`,
     `  Maschera    : ${mask}`,
     `  Gateway     : ${gateway ?? iface.gateway ?? "(nessuno)"}`,
-  ].join("\n");
+    warn,
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 function arpTable(ctx: CommandContext): string {
@@ -238,7 +269,7 @@ export function runPcCommand(
 
   if (lower === "ipconfig /renew" || lower === "ipconfig /release") {
     const device = getDevice(ctx.state, ctx.deviceId);
-    const iface = device?.interfaces.find((i) => !i.parentIfaceId);
+    const iface = device ? preferredHostIface(device) : undefined;
     if (!iface) return { output: "Nessuna interfaccia." };
     if (lower.endsWith("/release")) {
       ctx.setState(
