@@ -122,6 +122,8 @@ export function l2Flood(
 
     const device = getDevice(nextState, node.deviceId);
     if (!device) continue;
+    // Device spenti non inoltrano (né rispondono come host L2)
+    if (!device.powered) continue;
 
     // Learn source MAC on managed switch ingress
     if (

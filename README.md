@@ -20,9 +20,10 @@ Laboratorio stile **Cisco Packet Tracer** nel browser.
 - **ARP reale**: cache su host (`arp -a`) e router (`show arp`); si aggiorna con i ping
 - **Routing statico**: `ip route` / `show ip route` tra due router
 - **Salva / Carica** lab in JSON + autosave locale
-- **Condividi link** (`#lab=…`): topologia nell’URL, niente account/database
+- **Condividi link** (`#lab=…`): snapshot statico nell’URL (ripremi Condividi dopo modifiche), niente account/database
+- **Autosave** locale con ripristino all’apertura (prompt)
 - **Simulation**: ARP, ICMP, DHCP, DNS, HTTP (click destinazione Server)
-- Trascina i dispositivi dalla barra sotto sul canvas
+- Trascina i dispositivi dalla barra sotto sul canvas (snap griglia + Annulla/Ripeti)
 - **WAN Serial**: cavo Serial + `clock rate` sul DCE
 - **ACL** base Cisco-like (`access-list`, `ip access-group`)
 - Esercizi guidati VLAN (access + trunk + router-on-a-stick)

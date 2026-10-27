@@ -18,7 +18,8 @@ export function defaultServerServices(name: string): DeviceServices {
       mask: "255.255.255.0",
       gateway: "192.168.1.1",
       dns: "192.168.1.100",
-      startIp: "192.168.1.100",
+      // Evita collisione con IP statico tipico del server (.100)
+      startIp: "192.168.1.101",
       endIp: "192.168.1.200",
       leases: [],
     },
@@ -207,6 +208,69 @@ export function requestDhcp(
   };
 }
 
+/** Rilascia IP sul client e rimuove il lease dai server DHCP della LAN. */
+export function releaseDhcp(
+  state: LabState,
+  clientId: string,
+  ifaceId?: string,
+): { state: LabState; message: string } {
+  const client = getDevice(state, clientId);
+  if (!client) return { state, message: "Client non trovato." };
+  const iface =
+    (ifaceId
+      ? client.interfaces.find((i) => i.id === ifaceId)
+      : null) ??
+    client.interfaces.find(
+      (i) => i.connectedLinkId && i.media === "ethernet" && !i.parentIfaceId,
+    ) ??
+    client.interfaces.find((i) => i.connectedLinkId && !i.parentIfaceId) ??
+    client.interfaces[0];
+  if (!iface) return { state, message: "Nessuna interfaccia." };
+
+  let next: LabState = {
+    ...state,
+    devices: state.devices.map((d) => {
+      if (d.id !== clientId) return d;
+      return {
+        ...d,
+        interfaces: d.interfaces.map((i) =>
+          i.id === iface.id
+            ? {
+                ...i,
+                ip: null,
+                mask: null,
+                gateway: null,
+                dhcpClient: true,
+                dnsServers: [],
+              }
+            : i,
+        ),
+      };
+    }),
+  };
+
+  next = {
+    ...next,
+    devices: next.devices.map((d) => {
+      const dhcp = d.services?.dhcp;
+      if (!dhcp?.leases?.length) return d;
+      const leases = dhcp.leases.filter(
+        (l) => !(l.deviceId === clientId && l.ifaceId === iface.id),
+      );
+      if (leases.length === dhcp.leases.length) return d;
+      return {
+        ...d,
+        services: {
+          ...d.services,
+          dhcp: { ...dhcp, leases },
+        },
+      };
+    }),
+  };
+
+  return { state: next, message: "Indirizzo IP rilasciato." };
+}
+
 export function resolveDnsName(
   state: LabState,
   clientId: string,
@@ -277,11 +341,16 @@ export function updateDeviceServices(
   };
 }
 
+/**
+ * HTTP GET simulato. Passa `reachable: true` solo dopo un ping/rotta ok
+ * (evita import circolare con engine.runPing).
+ */
 export function fetchHttp(
   state: LabState,
   clientId: string,
   target: string,
-): { ok: boolean; output: string } {
+  opts?: { reachable?: boolean },
+): { ok: boolean; output: string; destIp?: string } {
   let ip = target;
   if (!/^\d+\.\d+\.\d+\.\d+$/.test(target)) {
     const resolved = resolveDnsName(state, clientId, target);
@@ -290,8 +359,6 @@ export function fetchHttp(
     }
     ip = resolved;
   }
-  const flood = l2Flood(state, clientId);
-  // Also try via gateway later — for now L2 or any host with that IP in lab
   let server: Device | undefined;
   for (const d of state.devices) {
     if (d.interfaces.some((i) => i.ip === ip) && d.services?.http?.enabled) {
@@ -300,21 +367,27 @@ export function fetchHttp(
     }
   }
   if (!server) {
-    return { ok: false, output: `Nessun servizio HTTP su ${ip}` };
+    return { ok: false, output: `Nessun servizio HTTP su ${ip}`, destIp: ip };
   }
-  // Reachability: same L2 or through router (simplified: any path via ping logic omitted — check L2 first)
-  const onL2 = flood.hosts.some((h) => h.device.id === server!.id);
-  if (!onL2) {
-    // allow if client has gateway (assume routed) when server has IP
-    const client = getDevice(state, clientId);
-    const hasGw = client?.interfaces.some((i) => i.gateway);
-    if (!hasGw) {
-      return { ok: false, output: `Host ${ip} non raggiungibile.` };
+  if (!opts?.reachable) {
+    // Senza check esterno: solo L2 (non fidarsi del solo gateway)
+    const flood = l2Flood(state, clientId);
+    const onL2 = flood.hosts.some((h) => h.device.id === server!.id);
+    if (!onL2) {
+      return {
+        ok: false,
+        output: `Host ${ip} non raggiungibile (verifica routing / usa ping).`,
+        destIp: ip,
+      };
     }
+  }
+  if (!server.powered) {
+    return { ok: false, output: `Host ${ip} spento.`, destIp: ip };
   }
   const http = server.services!.http!;
   return {
     ok: true,
+    destIp: ip,
     output: [
       `HTTP/1.1 200 OK`,
       `Server: ${server.name}`,

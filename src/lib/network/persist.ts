@@ -51,3 +51,17 @@ export function loadAutosave(): LabState | null {
     return null;
   }
 }
+
+/** True se c’è un lab non vuoto in autosave. */
+export function hasAutosaveLab(): boolean {
+  const s = loadAutosave();
+  return !!s && (s.devices.length > 0 || s.links.length > 0);
+}
+
+export function clearAutosave() {
+  try {
+    localStorage.removeItem(STORAGE_KEY);
+  } catch {
+    /* ignore */
+  }
+}

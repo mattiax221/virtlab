@@ -18,7 +18,14 @@ import {
   downloadPng,
   downloadSvg,
 } from "@/lib/network/exportDiagram";
-import { autosaveLab, downloadLab, parseLabJson } from "@/lib/network/persist";
+import {
+  autosaveLab,
+  clearAutosave,
+  downloadLab,
+  hasAutosaveLab,
+  loadAutosave,
+  parseLabJson,
+} from "@/lib/network/persist";
 import { shortPortName } from "@/lib/network/portSort";
 import {
   buildAutoSimulation,
@@ -33,11 +40,17 @@ import {
 import {
   DEVICE_META,
   isEndHost,
+  isL3Device,
   isWifiCapable,
   type Device,
   type DeviceKind,
   type LabState,
 } from "@/lib/network/types";
+
+const GRID = 28;
+function snap(n: number): number {
+  return Math.round(n / GRID) * GRID;
+}
 import { ContextMenu, type MenuItem } from "./ContextMenu";
 import { DeviceIcon } from "./DeviceIcon";
 import { ExercisesPanel } from "./ExercisesPanel";
@@ -87,17 +100,12 @@ function modeFor(device: Device): OpenMode {
   ) {
     return "switch";
   }
+  // Home / wireless router: CLI L3 (IP LAN, rotte) — Wi‑Fi dal menu contestuale
+  if (isL3Device(device.type)) {
+    return "router";
+  }
   if (isWifiCapable(device.type)) {
     return "wifi";
-  }
-  if (
-    device.type === "router" ||
-    device.type.startsWith("router_") ||
-    device.type.startsWith("firewall_") ||
-    device.type === "multilayer_switch" ||
-    device.type.startsWith("wlc")
-  ) {
-    return "router";
   }
   if (
     device.type === "pc" ||
@@ -111,34 +119,18 @@ function modeFor(device: Device): OpenMode {
 }
 
 export function LabWorkspace() {
-  // Sempre canvas vuoto all’avvio (come PT nuovo file). Demo resta disponibile.
   const [state, setState] = useState<LabState>(() => createEmptyLab());
   const stateRef = useRef(state);
+  const bootDoneRef = useRef(false);
   useEffect(() => {
     stateRef.current = state;
   }, [state]);
+  // Autosave solo dopo il boot (evita wipe del lab precedente con empty)
   useEffect(() => {
+    if (!bootDoneRef.current) return;
+    if (state.devices.length === 0 && state.links.length === 0) return;
     autosaveLab(state);
   }, [state]);
-
-  // Apri lab da URL (#lab=… o ?lab=…) — full open, niente account
-  useEffect(() => {
-    if (shareLoadedRef.current) return;
-    shareLoadedRef.current = true;
-    const param = readShareParamFromLocation();
-    if (!param) return;
-    void (async () => {
-      const decoded = await decodeLabFromHash(param);
-      if (decoded.state) {
-        setState(decoded.state);
-        setToast("Lab aperto dal link");
-        window.setTimeout(() => setToast(null), 2400);
-      } else if (decoded.error) {
-        setToast(decoded.error);
-        window.setTimeout(() => setToast(null), 3200);
-      }
-    })();
-  }, []);
 
   const [tool, setTool] = useState<Tool>("select");
   const [cableKind, setCableKind] = useState<CableKind>("auto");
@@ -169,24 +161,59 @@ export function LabWorkspace() {
   const [showExercises, setShowExercises] = useState(true);
   const [showExport, setShowExport] = useState(false);
   const [canUndo, setCanUndo] = useState(false);
+  const [canRedo, setCanRedo] = useState(false);
   const [shareBusy, setShareBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const historyRef = useRef<LabState[]>([]);
+  const redoRef = useRef<LabState[]>([]);
   const shareLoadedRef = useRef(false);
 
   const canvasRef = useRef<HTMLDivElement>(null);
 
   const showToast = useCallback((msg: string) => {
     setToast(msg);
-    window.setTimeout(() => setToast(null), 2400);
+    window.setTimeout(() => setToast(null), 2800);
   }, []);
+
+  // Boot: share URL > autosave prompt > lab vuoto
+  useEffect(() => {
+    if (shareLoadedRef.current) return;
+    shareLoadedRef.current = true;
+    void (async () => {
+      const param = readShareParamFromLocation();
+      if (param) {
+        const decoded = await decodeLabFromHash(param);
+        if (decoded.state) {
+          setState(decoded.state);
+          showToast("Lab aperto dal link (snapshot)");
+        } else if (decoded.error) {
+          showToast(decoded.error);
+        }
+        bootDoneRef.current = true;
+        return;
+      }
+      if (hasAutosaveLab()) {
+        const ok = window.confirm(
+          "Trovato un lab salvato in automatico.\nVuoi ripristinarlo?",
+        );
+        if (ok) {
+          const saved = loadAutosave();
+          if (saved) setState(saved);
+          showToast("Lab ripristinato dall’autosave");
+        }
+      }
+      bootDoneRef.current = true;
+    })();
+  }, [showToast]);
 
   const pushHistory = useCallback(() => {
     historyRef.current = [
       ...historyRef.current.slice(-39),
       structuredClone(stateRef.current),
     ];
+    redoRef.current = [];
     setCanUndo(true);
+    setCanRedo(false);
   }, []);
 
   const applyState = useCallback(
@@ -204,9 +231,31 @@ export function LabWorkspace() {
       showToast("Niente da annullare");
       return;
     }
+    redoRef.current = [
+      ...redoRef.current.slice(-39),
+      structuredClone(stateRef.current),
+    ];
     setState(prev);
     setCanUndo(historyRef.current.length > 0);
+    setCanRedo(true);
     showToast("Annullato");
+  }, [showToast]);
+
+  const redo = useCallback(() => {
+    const next = redoRef.current.pop();
+    if (!next) {
+      setCanRedo(false);
+      showToast("Niente da ripetere");
+      return;
+    }
+    historyRef.current = [
+      ...historyRef.current.slice(-39),
+      structuredClone(stateRef.current),
+    ];
+    setState(next);
+    setCanRedo(redoRef.current.length > 0);
+    setCanUndo(true);
+    showToast("Ripetuto");
   }, [showToast]);
 
   const openDevice = state.devices.find((d) => d.id === openDeviceId) ?? null;
@@ -251,6 +300,7 @@ export function LabWorkspace() {
       return;
     }
     applyState(createEmptyLab());
+    clearAutosave();
     setOpenDeviceId(null);
     setOpenMode(null);
     setSelectedId(null);
@@ -263,12 +313,14 @@ export function LabWorkspace() {
       applyState((s) => {
         const name = nextDeviceName(s, type);
         const rect = canvasRef.current?.getBoundingClientRect();
-        const px =
+        const px = snap(
           x ??
-          120 + Math.random() * Math.max(200, (rect?.width ?? 600) - 240);
-        const py =
+            120 + Math.random() * Math.max(200, (rect?.width ?? 600) - 240),
+        );
+        const py = snap(
           y ??
-          80 + Math.random() * Math.max(120, (rect?.height ?? 400) - 200);
+            80 + Math.random() * Math.max(120, (rect?.height ?? 400) - 200),
+        );
         const device = createDevice(type, name, px, py);
         queueMicrotask(() => {
           setSelectedId(device.id);
@@ -291,15 +343,18 @@ export function LabWorkspace() {
     setShareBusy(true);
     try {
       const url = await buildShareUrl(stateRef.current);
+      if (url.length > 7000) {
+        showToast("Lab grande: il link potrebbe non funzionare — usa Esporta JSON");
+      }
       window.history.replaceState(null, "", url);
       try {
         await navigator.clipboard.writeText(url);
-        showToast("Link copiato — apri questo lab");
+        showToast("Link snapshot copiato — ripremi Condividi dopo le modifiche");
       } catch {
-        showToast("Link aggiornato nella barra indirizzi");
+        showToast("Link snapshot in barra — non si aggiorna da solo");
       }
     } catch {
-      showToast("Condivisione fallita (lab troppo grande?)");
+      showToast("Condivisione fallita (lab troppo grande?) — usa Esporta JSON");
     } finally {
       setShareBusy(false);
     }
@@ -411,9 +466,15 @@ export function LabWorkspace() {
     if (!drag || tool !== "select") return;
     const rect = canvasRef.current?.getBoundingClientRect();
     if (!rect) return;
-    const x = Math.max(48, Math.min(rect.width - 48, e.clientX - rect.left - drag.ox));
-    const y = Math.max(48, Math.min(rect.height - 48, e.clientY - rect.top - drag.oy));
-    setState((s) => moveDevice(s, drag.id, x, y));
+    const rawX = Math.max(
+      48,
+      Math.min(rect.width - 48, e.clientX - rect.left - drag.ox),
+    );
+    const rawY = Math.max(
+      48,
+      Math.min(rect.height - 48, e.clientY - rect.top - drag.oy),
+    );
+    setState((s) => moveDevice(s, drag.id, snap(rawX), snap(rawY)));
   }
 
   function openContext(e: React.MouseEvent, target: CtxTarget) {
@@ -437,6 +498,20 @@ export function LabWorkspace() {
           shortcut: "2× clic",
           onClick: () => openDeviceUi(d),
         },
+        ...(isWifiCapable(d.type) && isL3Device(d.type)
+          ? [
+              {
+                type: "item" as const,
+                label: "Configura Wi‑Fi…",
+                onClick: () => {
+                  setCtx(null);
+                  setOpenDeviceId(d.id);
+                  setSelectedId(d.id);
+                  setOpenMode("wifi");
+                },
+              },
+            ]
+          : []),
         {
           type: "item",
           label: "Cos'è…",
@@ -544,6 +619,12 @@ export function LabWorkspace() {
         shortcut: "Ctrl+Z",
         onClick: () => undo(),
       },
+      {
+        type: "item",
+        label: "Ripeti",
+        shortcut: "Ctrl+Y",
+        onClick: () => redo(),
+      },
       { type: "sep" },
       {
         type: "item",
@@ -574,6 +655,7 @@ export function LabWorkspace() {
     applyState,
     confirmNewLab,
     undo,
+    redo,
   ]);
 
   useEffect(() => {
@@ -585,11 +667,22 @@ export function LabWorkspace() {
         setShowExport(false);
         if (tool === "cable" || tool === "delete") setTool("select");
       }
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z" && !e.shiftKey) {
         const tag = (e.target as HTMLElement)?.tagName;
         if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
         e.preventDefault();
         undo();
+        return;
+      }
+      if (
+        (e.ctrlKey || e.metaKey) &&
+        (e.key.toLowerCase() === "y" ||
+          (e.key.toLowerCase() === "z" && e.shiftKey))
+      ) {
+        const tag = (e.target as HTMLElement)?.tagName;
+        if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+        e.preventDefault();
+        redo();
         return;
       }
       if (
@@ -607,7 +700,7 @@ export function LabWorkspace() {
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [selectedId, openDeviceId, tool, showToast, undo, applyState]);
+  }, [selectedId, openDeviceId, tool, showToast, undo, redo, applyState]);
 
   return (
     <div
@@ -698,6 +791,9 @@ export function LabWorkspace() {
           )}
           <ToolButton active={canUndo} onClick={undo} title="Ctrl+Z">
             Annulla
+          </ToolButton>
+          <ToolButton active={canRedo} onClick={redo} title="Ctrl+Y">
+            Ripeti
           </ToolButton>
           <div className="relative">
             <ToolButton

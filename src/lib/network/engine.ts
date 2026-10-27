@@ -795,6 +795,18 @@ export function runPing(
       },
     };
   }
+  if (!from.powered) {
+    return {
+      state,
+      result: failPing(
+        "",
+        targetIp,
+        count,
+        [],
+        `${from.name} è spento (Physical → Accendi).`,
+      ),
+    };
+  }
 
   // DNS name → IP
   if (!isValidIp(targetIp)) {

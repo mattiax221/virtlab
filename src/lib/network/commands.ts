@@ -14,7 +14,7 @@ import {
   formatVlanBrief,
   l2Flood,
 } from "./l2";
-import { fetchHttp, requestDhcp } from "./services";
+import { fetchHttp, releaseDhcp, requestDhcp } from "./services";
 import type { CommandResult, LabState, StaticRoute, VlanRecord } from "./types";
 
 export type CommandContext = {
@@ -303,16 +303,9 @@ export function runPcCommand(
     const iface = device ? preferredHostIface(device) : undefined;
     if (!iface) return { output: "Nessuna interfaccia." };
     if (lower.endsWith("/release")) {
-      ctx.setState(
-        updateIface(ctx.state, ctx.deviceId, iface.id, {
-          ip: null,
-          mask: null,
-          gateway: null,
-          dhcpClient: true,
-          dnsServers: [],
-        }),
-      );
-      return { output: "Indirizzo IP rilasciato." };
+      const res = releaseDhcp(ctx.state, ctx.deviceId, iface.id);
+      ctx.setState(res.state);
+      return { output: res.message };
     }
     const res = requestDhcp(ctx.state, ctx.deviceId, iface.id);
     ctx.setState(res.state);
@@ -328,9 +321,18 @@ export function runPcCommand(
   }
 
   if (lower.startsWith("http ") || lower.startsWith("curl ")) {
-    const target = parts[1];
+    const target = parts[1]?.replace(/^https?:\/\//, "");
     if (!target) return { output: "Uso: http <host|ip>" };
-    const res = fetchHttp(ctx.state, ctx.deviceId, target.replace(/^https?:\/\//, ""));
+    const probe = fetchHttp(ctx.state, ctx.deviceId, target);
+    const dest = probe.destIp ?? target;
+    const { result, state } = runPing(ctx.state, ctx.deviceId, dest);
+    ctx.setState(state);
+    if (!result.ok) {
+      return {
+        output: `HTTP fallito: host non raggiungibile.\n${result.message.split("\n")[0]}`,
+      };
+    }
+    const res = fetchHttp(state, ctx.deviceId, target, { reachable: true });
     return { output: res.output };
   }
 

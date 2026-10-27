@@ -264,8 +264,10 @@ export function buildHttpSimulation(
     });
   }
 
-  const http = fetchHttp(next, fromDeviceId, host);
+  const reachable = result.ok;
+  const http = fetchHttp(next, fromDeviceId, host, { reachable });
   const serverId = path[path.length - 1]?.deviceId ?? null;
+  const ok = reachable && http.ok;
 
   packets.push({
     id: `http-req-${Date.now()}`,
@@ -275,29 +277,35 @@ export function buildHttpSimulation(
     toDeviceId: serverId,
     hops: path.length >= 2 ? path : devicePoint(state, fromDeviceId),
     hopIndex: 0,
-    ok: http.ok,
+    ok,
     detail: `GET http://${host}/`,
   });
   if (path.length >= 2) {
     packets.push({
       id: `http-res-${Date.now()}`,
       kind: "HTTP",
-      label: http.ok ? "HTTP 200" : "HTTP ERR",
+      label: ok ? "HTTP 200" : "HTTP ERR",
       fromDeviceId: serverId ?? fromDeviceId,
       toDeviceId: fromDeviceId,
       hops: [...path].reverse(),
       hopIndex: 0,
-      ok: http.ok,
-      detail: http.ok
+      ok,
+      detail: ok
         ? `200 OK (${http.output.split("\n").slice(-2).join(" ").slice(0, 48)}…)`
-        : http.output || "HTTP fallito",
+        : !reachable
+          ? result.message.split("\n")[0] || "Non raggiungibile"
+          : http.output || "HTTP fallito",
     });
   }
 
   return {
     packets,
     state: next,
-    message: http.ok ? `HTTP OK da ${host}` : http.output || "HTTP fallito",
+    message: ok
+      ? `HTTP OK da ${host}`
+      : !reachable
+        ? result.message.split("\n")[0] || "HTTP: non raggiungibile"
+        : http.output || "HTTP fallito",
   };
 }
 
