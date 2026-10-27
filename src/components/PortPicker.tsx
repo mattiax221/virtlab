@@ -1,5 +1,6 @@
 "use client";
 
+import { comparePorts } from "@/lib/network/portSort";
 import type { Device, InterfaceConfig } from "@/lib/network/types";
 import { DeviceIcon } from "./DeviceIcon";
 
@@ -25,29 +26,6 @@ function mediaLabel(media: InterfaceConfig["media"]): string {
     default:
       return "Eth";
   }
-}
-
-/** Ordine Cisco: Fa0/1 … Fa0/9, Fa0/10 (non lessicografico Fa0/1, Fa0/10, Fa0/2). */
-function portSortKey(name: string): [string, number, number, string] {
-  const m = name.match(/^([A-Za-z]+)(\d+)(?:\/(\d+))?(?:\.(\d+))?$/);
-  if (!m) return [name.toLowerCase(), 0, 0, name];
-  const type = m[1].toLowerCase();
-  const slot = Number(m[2]) || 0;
-  const port = m[3] != null ? Number(m[3]) : -1;
-  return [type, slot, port, name];
-}
-
-function comparePorts(a: InterfaceConfig, b: InterfaceConfig): number {
-  const mediaRank = (m: InterfaceConfig["media"]) =>
-    m === "ethernet" ? 0 : m === "fiber" ? 1 : m === "serial" ? 2 : m === "wireless" ? 3 : 4;
-  const mr = mediaRank(a.media) - mediaRank(b.media);
-  if (mr !== 0) return mr;
-  const ka = portSortKey(a.name);
-  const kb = portSortKey(b.name);
-  if (ka[0] !== kb[0]) return ka[0] < kb[0] ? -1 : 1;
-  if (ka[1] !== kb[1]) return ka[1] - kb[1];
-  if (ka[2] !== kb[2]) return ka[2] - kb[2];
-  return ka[3].localeCompare(kb[3]);
 }
 
 export function PortPicker({

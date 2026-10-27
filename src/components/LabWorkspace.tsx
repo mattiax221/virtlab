@@ -12,7 +12,14 @@ import {
   nextDeviceName,
 } from "@/lib/network/engine";
 import { CABLE_META, PT_PALETTE, type CableKind } from "@/lib/network/catalog";
+import {
+  downloadHtmlSnapshot,
+  downloadInventoryCsv,
+  downloadPng,
+  downloadSvg,
+} from "@/lib/network/exportDiagram";
 import { autosaveLab, downloadLab, parseLabJson } from "@/lib/network/persist";
+import { shortPortName } from "@/lib/network/portSort";
 import { buildPingSimulation, type SimPacket } from "@/lib/network/simulation";
 import {
   DEVICE_META,
@@ -122,7 +129,10 @@ export function LabWorkspace() {
   const [simPackets, setSimPackets] = useState<SimPacket[] | null>(null);
   const [simFrom, setSimFrom] = useState<string | null>(null);
   const [showExercises, setShowExercises] = useState(true);
+  const [showExport, setShowExport] = useState(false);
+  const [canUndo, setCanUndo] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const historyRef = useRef<LabState[]>([]);
 
   const canvasRef = useRef<HTMLDivElement>(null);
 
@@ -130,6 +140,34 @@ export function LabWorkspace() {
     setToast(msg);
     window.setTimeout(() => setToast(null), 2400);
   }, []);
+
+  const pushHistory = useCallback(() => {
+    historyRef.current = [
+      ...historyRef.current.slice(-39),
+      structuredClone(stateRef.current),
+    ];
+    setCanUndo(true);
+  }, []);
+
+  const applyState = useCallback(
+    (next: LabState | ((prev: LabState) => LabState)) => {
+      pushHistory();
+      setState(next);
+    },
+    [pushHistory],
+  );
+
+  const undo = useCallback(() => {
+    const prev = historyRef.current.pop();
+    if (!prev) {
+      setCanUndo(false);
+      showToast("Niente da annullare");
+      return;
+    }
+    setState(prev);
+    setCanUndo(historyRef.current.length > 0);
+    showToast("Annullato");
+  }, [showToast]);
 
   const openDevice = state.devices.find((d) => d.id === openDeviceId) ?? null;
   const inspectDevice = state.devices.find((d) => d.id === inspectId) ?? null;
@@ -161,9 +199,28 @@ export function LabWorkspace() {
     setOpenMode(null);
   }
 
+  const confirmNewLab = useCallback(() => {
+    const dirty =
+      stateRef.current.devices.length > 0 || stateRef.current.links.length > 0;
+    if (
+      dirty &&
+      !window.confirm(
+        "Nuovo lab: cancellare la topologia attuale?\n(Puoi usare Annulla subito dopo)",
+      )
+    ) {
+      return;
+    }
+    applyState(createEmptyLab());
+    setOpenDeviceId(null);
+    setOpenMode(null);
+    setSelectedId(null);
+    setCableDraft(null);
+    showToast("Nuovo lab vuoto");
+  }, [applyState, showToast]);
+
   const addDevice = useCallback(
     (type: DeviceKind) => {
-      setState((s) => {
+      applyState((s) => {
         const name = nextDeviceName(s, type);
         const rect = canvasRef.current?.getBoundingClientRect();
         const x = 120 + Math.random() * Math.max(200, (rect?.width ?? 600) - 240);
@@ -178,7 +235,7 @@ export function LabWorkspace() {
       setTool("select");
       setCableDraft(null);
     },
-    [showToast],
+    [applyState, showToast],
   );
 
   const cancelCable = useCallback(() => {
@@ -205,7 +262,7 @@ export function LabWorkspace() {
     e.stopPropagation();
     setCtx(null);
     if (tool === "delete") {
-      setState((s) => deleteDevice(s, device.id));
+      applyState((s) => deleteDevice(s, device.id));
       if (openDeviceId === device.id) closeOpen();
       showToast(`Eliminato ${device.name}`);
       return;
@@ -222,7 +279,7 @@ export function LabWorkspace() {
         state.devices.find((d) => d.id === device.id)?.interfaces.find((i) => i.ip)
           ?.ip ?? device.name;
       const built = buildPingSimulation(state, simFrom, target);
-      setState(built.state);
+      applyState(built.state);
       setSimPackets(built.packets);
       showToast(built.packets.length ? "Simulation avviata" : built.message);
       setSimFrom(null);
@@ -334,7 +391,7 @@ export function LabWorkspace() {
           danger: true,
           shortcut: "Canc",
           onClick: () => {
-            setState((s) => deleteDevice(s, d.id));
+            applyState((s) => deleteDevice(s, d.id));
             if (openDeviceId === d.id) closeOpen();
             setSelectedId(null);
             showToast(`Eliminato ${d.name}`);
@@ -348,11 +405,19 @@ export function LabWorkspace() {
       const link = state.links.find((l) => l.id === id);
       if (!link) return [];
       const media = CABLE_META[link.media]?.label ?? link.media;
+      const a = state.devices.find((d) => d.id === link.aDeviceId);
+      const b = state.devices.find((d) => d.id === link.bDeviceId);
+      const aIf = a?.interfaces.find((i) => i.id === link.aIfaceId);
+      const bIf = b?.interfaces.find((i) => i.id === link.bIfaceId);
+      const ends =
+        a && b && aIf && bIf
+          ? `${a.name}:${shortPortName(aIf.name)} ↔ ${b.name}:${shortPortName(bIf.name)}`
+          : media;
       return [
         {
           type: "item",
-          label: "Cos'è…",
-          onClick: () => showToast(`Cavo: ${media}`),
+          label: ends,
+          onClick: () => showToast(`${ends} · ${media}`),
         },
         { type: "sep" },
         {
@@ -360,7 +425,7 @@ export function LabWorkspace() {
           label: "Elimina cavo",
           danger: true,
           onClick: () => {
-            setState((s) => deleteLink(s, link.id));
+            applyState((s) => deleteLink(s, link.id));
             showToast("Cavo rimosso");
           },
         },
@@ -390,20 +455,21 @@ export function LabWorkspace() {
         type: "item",
         label: "Carica demo LAN",
         onClick: () => {
-          setState(createDemoLab());
+          applyState(createDemoLab());
           closeOpen();
           showToast("Demo LAN");
         },
       },
       {
         type: "item",
-        label: "Svuota topologia",
-        danger: true,
-        onClick: () => {
-          setState(createEmptyLab());
-          closeOpen();
-          setSelectedId(null);
-        },
+        label: "Nuovo lab…",
+        onClick: () => confirmNewLab(),
+      },
+      {
+        type: "item",
+        label: "Annulla",
+        shortcut: "Ctrl+Z",
+        onClick: () => undo(),
       },
       { type: "sep" },
       {
@@ -432,6 +498,9 @@ export function LabWorkspace() {
     showToast,
     addDevice,
     startCableFrom,
+    applyState,
+    confirmNewLab,
+    undo,
   ]);
 
   useEffect(() => {
@@ -440,7 +509,15 @@ export function LabWorkspace() {
         setCtx(null);
         setCableDraft(null);
         setInspectId(null);
+        setShowExport(false);
         if (tool === "cable" || tool === "delete") setTool("select");
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
+        const tag = (e.target as HTMLElement)?.tagName;
+        if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+        e.preventDefault();
+        undo();
+        return;
       }
       if (
         (e.key === "Delete" || e.key === "Backspace") &&
@@ -450,14 +527,14 @@ export function LabWorkspace() {
         const tag = (e.target as HTMLElement)?.tagName;
         if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
         e.preventDefault();
-        setState((s) => deleteDevice(s, selectedId));
+        applyState((s) => deleteDevice(s, selectedId));
         showToast("Eliminato");
         setSelectedId(null);
       }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [selectedId, openDeviceId, tool, showToast]);
+  }, [selectedId, openDeviceId, tool, showToast, undo, applyState]);
 
   return (
     <div
@@ -546,14 +623,77 @@ export function LabWorkspace() {
                     : "Cavo… scegli porta 2"}
             </span>
           )}
-          <ToolButton
-            onClick={() => {
-              downloadLab(state);
-              showToast("Lab salvato (JSON)");
-            }}
-          >
-            Salva
+          <ToolButton active={canUndo} onClick={undo} title="Ctrl+Z">
+            Annulla
           </ToolButton>
+          <div className="relative">
+            <ToolButton
+              active={showExport}
+              onClick={() => setShowExport((v) => !v)}
+            >
+              Esporta
+            </ToolButton>
+            {showExport && (
+              <div className="absolute right-0 top-full z-40 mt-1 w-52 overflow-hidden rounded-md border border-slate-700 bg-slate-950 py-1 text-xs shadow-xl">
+                {(
+                  [
+                    {
+                      id: "json",
+                      label: "Lab JSON (.json)",
+                      run: () => {
+                        downloadLab(state);
+                        showToast("Esportato JSON");
+                      },
+                    },
+                    {
+                      id: "png",
+                      label: "Schema PNG (.png)",
+                      run: async () => {
+                        await downloadPng(state);
+                        showToast("Esportato PNG");
+                      },
+                    },
+                    {
+                      id: "svg",
+                      label: "Schema SVG (.svg)",
+                      run: () => {
+                        downloadSvg(state);
+                        showToast("Esportato SVG");
+                      },
+                    },
+                    {
+                      id: "html",
+                      label: "Snapshot HTML (.html)",
+                      run: () => {
+                        downloadHtmlSnapshot(state);
+                        showToast("Esportato HTML");
+                      },
+                    },
+                    {
+                      id: "csv",
+                      label: "Inventario CSV (.csv)",
+                      run: () => {
+                        downloadInventoryCsv(state);
+                        showToast("Esportato CSV");
+                      },
+                    },
+                  ] as const
+                ).map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className="block w-full px-3 py-2 text-left text-slate-200 hover:bg-sky-900/50"
+                    onClick={() => {
+                      void item.run();
+                      setShowExport(false);
+                    }}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
           <ToolButton onClick={() => fileRef.current?.click()}>Carica</ToolButton>
           <input
             ref={fileRef}
@@ -570,29 +710,21 @@ export function LabWorkspace() {
                 showToast(parsed.error ?? "Caricamento fallito");
                 return;
               }
-              setState(parsed.state);
+              applyState(parsed.state);
               closeOpen();
               showToast("Lab caricato");
             }}
           />
           <ToolButton
             onClick={() => {
-              setState(createDemoLab());
+              applyState(createDemoLab());
               closeOpen();
               showToast("Demo LAN");
             }}
           >
             Demo
           </ToolButton>
-          <ToolButton
-            onClick={() => {
-              setState(createEmptyLab());
-              closeOpen();
-              setSelectedId(null);
-            }}
-          >
-            Svuota
-          </ToolButton>
+          <ToolButton onClick={confirmNewLab}>Nuovo</ToolButton>
         </div>
       </header>
 
@@ -618,10 +750,11 @@ export function LabWorkspace() {
               const meta = CABLE_META[link.media] ?? CABLE_META.straight;
               const aIf = a.interfaces.find((i) => i.id === link.aIfaceId);
               const bIf = b.interfaces.find((i) => i.id === link.bIfaceId);
-              const ax = a.x + (b.x - a.x) * 0.18;
-              const ay = a.y + (b.y - a.y) * 0.18;
-              const bx = a.x + (b.x - a.x) * 0.82;
-              const by = a.y + (b.y - a.y) * 0.82;
+              const ax = a.x + (b.x - a.x) * 0.2;
+              const ay = a.y + (b.y - a.y) * 0.2;
+              const bx = a.x + (b.x - a.x) * 0.8;
+              const by = a.y + (b.y - a.y) * 0.8;
+              const tip = `${a.name}:${aIf ? shortPortName(aIf.name) : "?"} ↔ ${b.name}:${bIf ? shortPortName(bIf.name) : "?"} (${meta.label})`;
               return (
                 <g key={link.id} style={{ pointerEvents: "stroke" }}>
                   <line
@@ -631,7 +764,7 @@ export function LabWorkspace() {
                     y2={b.y}
                     stroke={meta.color}
                     strokeWidth="2.5"
-                    strokeOpacity="0.85"
+                    strokeOpacity="0.9"
                     strokeDasharray={meta.dash}
                   />
                   <line
@@ -640,7 +773,7 @@ export function LabWorkspace() {
                     x2={b.x}
                     y2={b.y}
                     stroke="transparent"
-                    strokeWidth="14"
+                    strokeWidth="16"
                     className="cursor-pointer"
                     style={{ pointerEvents: "stroke" }}
                     onContextMenu={(e) => {
@@ -655,38 +788,63 @@ export function LabWorkspace() {
                     onClick={(e) => {
                       e.stopPropagation();
                       if (tool === "delete") {
-                        setState((s) => deleteLink(s, link.id));
+                        applyState((s) => deleteLink(s, link.id));
                         showToast("Cavo rimosso");
                       } else {
-                        showToast(
-                          `${a.name} ${aIf?.name ?? "?"} ↔ ${b.name} ${bIf?.name ?? "?"}`,
-                        );
+                        showToast(tip);
                       }
                     }}
-                  />
+                  >
+                    <title>{tip}</title>
+                  </line>
                   {aIf && (
-                    <text
-                      x={ax}
-                      y={ay - 6}
-                      textAnchor="middle"
-                      className="fill-slate-400"
-                      style={{ fontSize: 9, pointerEvents: "none" }}
-                    >
-                      {aIf.name.replace("FastEthernet", "Fa").replace("GigabitEthernet", "Gi")}
-                    </text>
+                    <g style={{ pointerEvents: "none" }}>
+                      <rect
+                        x={ax - 24}
+                        y={ay - 18}
+                        width={48}
+                        height={14}
+                        rx={3}
+                        fill="#020617"
+                        fillOpacity="0.92"
+                        stroke="#334155"
+                        strokeWidth="1"
+                      />
+                      <text
+                        x={ax}
+                        y={ay - 7}
+                        textAnchor="middle"
+                        fill="#f1f5f9"
+                        style={{ fontSize: 9, fontFamily: "ui-monospace, monospace" }}
+                      >
+                        {shortPortName(aIf.name)}
+                      </text>
+                    </g>
                   )}
                   {bIf && (
-                    <text
-                      x={bx}
-                      y={by - 6}
-                      textAnchor="middle"
-                      className="fill-slate-400"
-                      style={{ fontSize: 9, pointerEvents: "none" }}
-                    >
-                      {bIf.name.replace("FastEthernet", "Fa").replace("GigabitEthernet", "Gi")}
-                    </text>
+                    <g style={{ pointerEvents: "none" }}>
+                      <rect
+                        x={bx - 24}
+                        y={by - 18}
+                        width={48}
+                        height={14}
+                        rx={3}
+                        fill="#020617"
+                        fillOpacity="0.92"
+                        stroke="#334155"
+                        strokeWidth="1"
+                      />
+                      <text
+                        x={bx}
+                        y={by - 7}
+                        textAnchor="middle"
+                        fill="#f1f5f9"
+                        style={{ fontSize: 9, fontFamily: "ui-monospace, monospace" }}
+                      >
+                        {shortPortName(bIf.name)}
+                      </text>
+                    </g>
                   )}
-                  <title>{`${a.name}:${aIf?.name} ↔ ${b.name}:${bIf?.name}`}</title>
                 </g>
               );
             })}
@@ -975,10 +1133,12 @@ export function LabWorkspace() {
               "?";
             const bName =
               b?.interfaces.find((i) => i.id === ifaceId)?.name ?? "?";
-            setState(result.state);
+            applyState(result.state);
             setCableDraft(null);
             setTool("select");
-            showToast(`Collegato ${a?.name}.${aName} ↔ ${b?.name}.${bName}`);
+            showToast(
+              `Collegato ${a?.name}:${shortPortName(aName)} ↔ ${b?.name}:${shortPortName(bName)}`,
+            );
           }}
         />
       )}
@@ -990,14 +1150,17 @@ function ToolButton({
   children,
   onClick,
   active,
+  title,
 }: {
   children: React.ReactNode;
   onClick: () => void;
   active?: boolean;
+  title?: string;
 }) {
   return (
     <button
       type="button"
+      title={title}
       onClick={onClick}
       className={`rounded px-2.5 py-1 text-xs font-medium transition ${
         active
