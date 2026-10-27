@@ -1,32 +1,47 @@
 "use client";
 
-import { useState } from "react";
+/**
+ * Pannello Server-PT ricostruito dalle docs ufficiali:
+ * https://tutorials.ptnetacad.net/help/default/config_servers.htm
+ *
+ * Tab: Config (GLOBAL + INTERFACE) | Services (HTTP DHCP TFTP DNS SYSLOG AAA NTP EMAIL FTP)
+ */
+import { useMemo, useState } from "react";
+import { normalizeDhcp } from "@/lib/network/services";
 import type {
+  AaaClient,
   Device,
   DeviceServices,
+  DhcpPool,
   DnsRecord,
   FtpAccount,
   LabState,
   ServerUser,
 } from "@/lib/network/types";
 
-type Tab =
-  | "global"
-  | "dhcp"
-  | "dns"
+type TopTab = "config" | "services";
+type ConfigNav = "settings" | "algorithm" | string; // string = iface id
+type SvcNav =
   | "http"
+  | "dhcp"
+  | "tftp"
+  | "dns"
+  | "syslog"
+  | "aaa"
+  | "ntp"
   | "email"
-  | "ftp"
-  | "aaa";
+  | "ftp";
 
-const TABS: { id: Tab; label: string }[] = [
-  { id: "global", label: "GLOBAL" },
-  { id: "dhcp", label: "DHCP" },
-  { id: "dns", label: "DNS" },
+const SVC_ITEMS: { id: SvcNav; label: string }[] = [
   { id: "http", label: "HTTP" },
+  { id: "dhcp", label: "DHCP" },
+  { id: "tftp", label: "TFTP" },
+  { id: "dns", label: "DNS" },
+  { id: "syslog", label: "SYSLOG" },
+  { id: "aaa", label: "AAA" },
+  { id: "ntp", label: "NTP" },
   { id: "email", label: "EMAIL" },
   { id: "ftp", label: "FTP" },
-  { id: "aaa", label: "AAA" },
 ];
 
 export function ServerServices({
@@ -43,17 +58,29 @@ export function ServerServices({
   const live =
     stateRef.current.devices.find((d) => d.id === device.id) ?? device;
   const svc = live.services;
-  const [tab, setTab] = useState<Tab>("dhcp");
+
+  const [top, setTop] = useState<TopTab>("services");
+  const [configNav, setConfigNav] = useState<ConfigNav>("settings");
+  const [svcNav, setSvcNav] = useState<SvcNav>("http");
+
   const [dnsDraft, setDnsDraft] = useState({
     name: "",
-    type: "A" as "A" | "CNAME" | "NS" | "SOA",
+    type: "A" as DnsRecord["type"],
     ip: "",
     target: "",
   });
-  const [userDraft, setUserDraft] = useState({ username: "", password: "" });
+  const [poolDraft, setPoolDraft] = useState({
+    name: "",
+    gateway: "192.168.1.1",
+    dns: "192.168.1.100",
+    startIp: "192.168.1.150",
+    mask: "255.255.255.0",
+    maxUsers: 50,
+  });
+  const [emailUser, setEmailUser] = useState({ username: "", password: "" });
   const [ftpDraft, setFtpDraft] = useState({
     username: "",
-    password: "",
+    password: "cisco",
     write: true,
     read: true,
     delete: false,
@@ -64,18 +91,37 @@ export function ServerServices({
     name: "",
     ip: "",
     secret: "cisco",
-    type: "radius" as "radius" | "tacacs",
+    type: "radius" as AaaClient["type"],
   });
+  const [aaaUser, setAaaUser] = useState({ username: "", password: "" });
+  const [httpPage, setHttpPage] = useState("index.html");
 
-  function patch(nextServices: DeviceServices) {
+  const ifaces = useMemo(
+    () => live.interfaces.filter((i) => !i.parentIfaceId),
+    [live.interfaces],
+  );
+
+  function commit(nextDev: Device) {
     const next = {
       ...stateRef.current,
       devices: stateRef.current.devices.map((d) =>
-        d.id === live.id ? { ...d, services: nextServices } : d,
+        d.id === live.id ? nextDev : d,
       ),
     };
     stateRef.current = next;
     setState(next);
+  }
+
+  function patchServices(patch: Partial<DeviceServices>) {
+    commit({
+      ...live,
+      services: { ...live.services, ...patch },
+      name: patch.displayName ?? live.name,
+    });
+  }
+
+  function patchSvc(full: DeviceServices) {
+    commit({ ...live, services: full, name: full.displayName ?? live.name });
   }
 
   function patchIface(
@@ -86,311 +132,678 @@ export function ServerServices({
       gateway: string | null;
       enabled: boolean;
       dhcpClient: boolean;
+      dnsServers: string[];
     }>,
   ) {
-    const next = {
-      ...stateRef.current,
-      devices: stateRef.current.devices.map((d) => {
-        if (d.id !== live.id) return d;
-        return {
-          ...d,
-          interfaces: d.interfaces.map((i) =>
-            i.id === ifaceId ? { ...i, ...fields } : i,
-          ),
-        };
-      }),
-    };
-    stateRef.current = next;
-    setState(next);
+    commit({
+      ...live,
+      interfaces: live.interfaces.map((i) =>
+        i.id === ifaceId ? { ...i, ...fields } : i,
+      ),
+    });
   }
 
   if (!svc) {
     return (
-      <div className="p-4 text-sm text-slate-600">
-        Nessun servizio su questo host.
-        <button type="button" className="ml-2 underline" onClick={onClose}>
+      <div className="p-4 text-sm">
+        Nessun servizio.{" "}
+        <button type="button" className="underline" onClick={onClose}>
           Chiudi
         </button>
       </div>
     );
   }
 
-  const ethIfaces = live.interfaces.filter(
-    (i) => !i.parentIfaceId && (i.media === "ethernet" || i.media === "fiber"),
-  );
+  const dhcp = normalizeDhcp(svc.dhcp) ?? {
+    enabled: false,
+    pools: [],
+  };
+  const httpPages = svc.http?.pages ?? [];
+  const activePage =
+    httpPages.find((p) => p.name === httpPage) ?? httpPages[0];
 
   return (
     <div
-      className="flex h-full min-h-0 flex-col bg-[#f0f0f0] text-[12px] text-black"
-      style={{ fontFamily: "Segoe UI, Tahoma, sans-serif" }}
+      className="flex h-full min-h-0 flex-col bg-[#ece9d8] text-[12px] text-black"
+      style={{ fontFamily: "Tahoma, Segoe UI, sans-serif" }}
     >
-      <div className="flex items-center justify-between border-b border-[#d4d4d4] bg-white px-2 py-1.5">
-        <span className="text-[13px] font-semibold">
-          Services — {live.name}{" "}
-          <span className="font-normal text-[#666]">(Server-PT)</span>
+      {/* Title bar PT-like */}
+      <div className="flex items-center justify-between border-b border-[#aca899] bg-gradient-to-b from-[#0a246a] to-[#a6caf0] px-2 py-1 text-white">
+        <span className="font-semibold">
+          {svc.displayName ?? live.name} — Server-PT
         </span>
         <button
           type="button"
-          className="px-2 hover:bg-rose-500 hover:text-white"
+          className="px-2 hover:bg-rose-600"
           onClick={onClose}
         >
           ✕
         </button>
       </div>
-      <div className="flex flex-wrap gap-0.5 border-b border-[#d4d4d4] bg-[#fafafa] px-1 pt-1">
-        {TABS.map((t) => (
+
+      {/* Top tabs: Config | Services */}
+      <div className="flex gap-0 border-b border-[#aca899] bg-[#ece9d8] px-1 pt-1">
+        {(
+          [
+            ["config", "Config"],
+            ["services", "Services"],
+          ] as const
+        ).map(([id, label]) => (
           <button
-            key={t.id}
+            key={id}
             type="button"
-            onClick={() => setTab(t.id)}
-            className={`px-2.5 py-1 text-[11px] ${
-              tab === t.id
-                ? "border border-b-0 border-[#d4d4d4] bg-white font-semibold"
-                : "text-[#666] hover:text-black"
+            onClick={() => setTop(id)}
+            className={`rounded-t px-4 py-1 ${
+              top === id
+                ? "border border-b-0 border-[#aca899] bg-white font-semibold"
+                : "text-[#555]"
             }`}
           >
-            {t.label}
+            {label}
           </button>
         ))}
       </div>
 
-      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3">
-        {tab === "global" && (
-          <>
-            <p className="text-[11px] text-[#555]">
-              Impostazioni globali e interfacce (docs PT Configuring Servers).
-            </p>
-            <label className="flex items-center justify-between gap-2">
-              <span>Display Name</span>
-              <input
-                value={live.name}
-                onChange={(e) => {
-                  const next = {
-                    ...stateRef.current,
-                    devices: stateRef.current.devices.map((d) =>
-                      d.id === live.id ? { ...d, name: e.target.value } : d,
-                    ),
-                  };
-                  stateRef.current = next;
-                  setState(next);
-                }}
-                className="w-48 border border-[#7a9cbc] px-1 py-0.5"
-              />
-            </label>
-            <label className="flex items-center justify-between gap-2">
-              <span>Domain Name</span>
-              <input
-                value={svc.domain ?? ""}
-                onChange={(e) =>
-                  patch({ ...svc, domain: e.target.value })
-                }
-                placeholder="lab.local"
-                className="w-48 border border-[#7a9cbc] px-1 py-0.5 font-mono"
-              />
-            </label>
-            <div className="rounded border border-[#d4d4d4] bg-white p-2">
-              <div className="mb-2 font-medium">Interfacce</div>
-              {ethIfaces.length === 0 ? (
-                <div className="text-[#888]">Nessuna Ethernet — Physical</div>
-              ) : (
-                ethIfaces.map((i) => (
-                  <div
+      <div className="flex min-h-0 flex-1">
+        {/* Left navigation */}
+        <div className="w-44 shrink-0 overflow-y-auto border-r border-[#aca899] bg-[#f0f0f0] p-1">
+          {top === "config" ? (
+            <>
+              <NavGroup label="GLOBAL">
+                <NavItem
+                  active={configNav === "settings"}
+                  onClick={() => setConfigNav("settings")}
+                >
+                  Settings
+                </NavItem>
+                <NavItem
+                  active={configNav === "algorithm"}
+                  onClick={() => setConfigNav("algorithm")}
+                >
+                  Algorithm Settings
+                </NavItem>
+              </NavGroup>
+              <NavGroup label="INTERFACE">
+                {ifaces.map((i) => (
+                  <NavItem
                     key={i.id}
-                    className="mb-2 grid gap-1 border-b border-[#eee] pb-2 last:border-0"
+                    active={configNav === i.id}
+                    onClick={() => setConfigNav(i.id)}
                   >
-                    <div className="font-mono font-semibold">{i.name}</div>
-                    <label className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        checked={i.enabled}
-                        onChange={(e) =>
-                          patchIface(i.id, { enabled: e.target.checked })
-                        }
-                      />
-                      Port Status On
-                    </label>
-                    <label className="flex items-center justify-between gap-2">
-                      <span>IP Address</span>
-                      <input
-                        value={i.ip ?? ""}
-                        onChange={(e) =>
-                          patchIface(i.id, {
-                            ip: e.target.value || null,
-                            dhcpClient: false,
-                          })
-                        }
-                        className="w-36 border border-[#7a9cbc] px-1 py-0.5 font-mono"
-                      />
-                    </label>
-                    <label className="flex items-center justify-between gap-2">
-                      <span>Subnet Mask</span>
-                      <input
-                        value={i.mask ?? ""}
-                        onChange={(e) =>
-                          patchIface(i.id, { mask: e.target.value || null })
-                        }
-                        className="w-36 border border-[#7a9cbc] px-1 py-0.5 font-mono"
-                      />
-                    </label>
-                    <label className="flex items-center justify-between gap-2">
-                      <span>Default Gateway</span>
-                      <input
-                        value={i.gateway ?? ""}
-                        onChange={(e) =>
-                          patchIface(i.id, {
-                            gateway: e.target.value || null,
-                          })
-                        }
-                        className="w-36 border border-[#7a9cbc] px-1 py-0.5 font-mono"
-                      />
-                    </label>
-                    <div className="text-[10px] text-[#888]">
-                      MAC {i.mac} · {i.media}
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </>
-        )}
+                    {i.name}
+                  </NavItem>
+                ))}
+              </NavGroup>
+            </>
+          ) : (
+            <NavGroup label="SERVICES">
+              {SVC_ITEMS.map((s) => (
+                <NavItem
+                  key={s.id}
+                  active={svcNav === s.id}
+                  onClick={() => setSvcNav(s.id)}
+                >
+                  {s.label}
+                </NavItem>
+              ))}
+            </NavGroup>
+          )}
+        </div>
 
-        {tab === "dhcp" && svc.dhcp && (
-          <>
-            <label className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={svc.dhcp.enabled}
-                onChange={(e) =>
-                  patch({
-                    ...svc,
-                    dhcp: { ...svc.dhcp!, enabled: e.target.checked },
-                  })
-                }
-              />
-              Service On
-            </label>
-            {(
-              [
-                ["network", "Network"],
-                ["mask", "Subnet Mask"],
-                ["gateway", "Default Gateway"],
-                ["dns", "DNS Server"],
-                ["startIp", "Start IP Address"],
-                ["endIp", "End IP Address"],
-              ] as const
-            ).map(([key, label]) => (
-              <label
-                key={key}
-                className="flex items-center justify-between gap-2"
-              >
-                <span>{label}</span>
+        {/* Content */}
+        <div className="min-h-0 flex-1 overflow-y-auto bg-white p-3">
+          {top === "config" && configNav === "settings" && (
+            <Section title="Global Settings">
+              <Field label="Display Name">
                 <input
-                  value={svc.dhcp![key]}
+                  className="rounded-none border border-[#7f9db9] bg-white px-1 py-0.5 text-[12px]"
+                  value={svc.displayName ?? live.name}
                   onChange={(e) =>
-                    patch({
-                      ...svc,
-                      dhcp: { ...svc.dhcp!, [key]: e.target.value },
+                    patchServices({ displayName: e.target.value })
+                  }
+                />
+              </Field>
+              <div className="mt-2 font-semibold">Gateway / DNS (IPv4)</div>
+              <div className="mt-1 flex gap-3">
+                <label className="flex items-center gap-1">
+                  <input
+                    type="radio"
+                    checked={(svc.ipv4Mode ?? "static") === "static"}
+                    onChange={() => patchServices({ ipv4Mode: "static" })}
+                  />
+                  Static
+                </label>
+                <label className="flex items-center gap-1">
+                  <input
+                    type="radio"
+                    checked={svc.ipv4Mode === "dhcp"}
+                    onChange={() => patchServices({ ipv4Mode: "dhcp" })}
+                  />
+                  DHCP
+                </label>
+              </div>
+              <Field label="Gateway">
+                <input
+                  className="rounded-none border border-[#7f9db9] bg-white px-1 py-0.5 text-[12px] font-mono"
+                  value={svc.gateway ?? ""}
+                  disabled={svc.ipv4Mode === "dhcp"}
+                  onChange={(e) => patchServices({ gateway: e.target.value })}
+                />
+              </Field>
+              <Field label="DNS Server">
+                <input
+                  className="rounded-none border border-[#7f9db9] bg-white px-1 py-0.5 text-[12px] font-mono"
+                  value={svc.dnsServer ?? ""}
+                  disabled={svc.ipv4Mode === "dhcp"}
+                  onChange={(e) =>
+                    patchServices({ dnsServer: e.target.value })
+                  }
+                />
+              </Field>
+              <p className="mt-2 text-[11px] text-[#666]">
+                Docs PT: Static imposta Gateway e DNS; DHCP ottiene la config
+                automaticamente.
+              </p>
+            </Section>
+          )}
+
+          {top === "config" && configNav === "algorithm" && (
+            <Section title="Algorithm Settings">
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={svc.algorithm?.useGlobal ?? true}
+                  onChange={(e) =>
+                    patchServices({
+                      algorithm: {
+                        useGlobal: e.target.checked,
+                        maxConnections: svc.algorithm?.maxConnections ?? 100,
+                        maxSessions: svc.algorithm?.maxSessions ?? 50,
+                        retransmitMs: svc.algorithm?.retransmitMs ?? 2000,
+                      },
                     })
                   }
-                  className="w-40 border border-[#7a9cbc] px-1 py-0.5 font-mono"
                 />
+                Global Settings
               </label>
-            ))}
-            <div className="rounded border border-[#d4d4d4] bg-white p-2">
-              <div className="mb-1 font-medium">
-                Leases ({svc.dhcp.leases.length})
-              </div>
-              {svc.dhcp.leases.length === 0 ? (
-                <div className="text-[#888]">Nessuno</div>
-              ) : (
-                svc.dhcp.leases.map((l) => (
-                  <div key={l.ifaceId} className="font-mono text-[11px]">
-                    {l.ip} · {l.mac}
-                  </div>
-                ))
+              {!(svc.algorithm?.useGlobal ?? true) && (
+                <>
+                  <Field label="Max Connections">
+                    <input
+                      type="number"
+                      className="rounded-none border border-[#7f9db9] bg-white px-1 py-0.5 text-[12px] w-24"
+                      value={svc.algorithm?.maxConnections ?? 100}
+                      onChange={(e) =>
+                        patchServices({
+                          algorithm: {
+                            ...svc.algorithm!,
+                            useGlobal: false,
+                            maxConnections: Number(e.target.value) || 0,
+                          },
+                        })
+                      }
+                    />
+                  </Field>
+                  <Field label="Max Opened Sessions">
+                    <input
+                      type="number"
+                      className="rounded-none border border-[#7f9db9] bg-white px-1 py-0.5 text-[12px] w-24"
+                      value={svc.algorithm?.maxSessions ?? 50}
+                      onChange={(e) =>
+                        patchServices({
+                          algorithm: {
+                            ...svc.algorithm!,
+                            useGlobal: false,
+                            maxSessions: Number(e.target.value) || 0,
+                          },
+                        })
+                      }
+                    />
+                  </Field>
+                  <Field label="Retransmit Timeout (ms)">
+                    <input
+                      type="number"
+                      className="rounded-none border border-[#7f9db9] bg-white px-1 py-0.5 text-[12px] w-24"
+                      value={svc.algorithm?.retransmitMs ?? 2000}
+                      onChange={(e) =>
+                        patchServices({
+                          algorithm: {
+                            ...svc.algorithm!,
+                            useGlobal: false,
+                            retransmitMs: Number(e.target.value) || 0,
+                          },
+                        })
+                      }
+                    />
+                  </Field>
+                </>
               )}
-            </div>
-          </>
-        )}
+            </Section>
+          )}
 
-        {tab === "dns" && svc.dns && (
-          <>
-            <label className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={svc.dns.enabled}
-                onChange={(e) =>
-                  patch({
-                    ...svc,
-                    dns: { ...svc.dns!, enabled: e.target.checked },
-                  })
-                }
-              />
-              Service On
-            </label>
-            <div className="rounded border border-[#d4d4d4] bg-white p-2">
-              <div className="mb-1 font-medium">Resource Records</div>
-              <div className="mb-2 flex flex-wrap gap-1">
+          {top === "config" &&
+            ifaces.some((i) => i.id === configNav) &&
+            (() => {
+              const i = ifaces.find((x) => x.id === configNav)!;
+              return (
+                <Section title={`Interface — ${i.name}`}>
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={i.enabled}
+                      onChange={(e) =>
+                        patchIface(i.id, { enabled: e.target.checked })
+                      }
+                    />
+                    Port Status
+                  </label>
+                  <Field label="Bandwidth">
+                    <select className="rounded-none border border-[#7f9db9] bg-white px-1 py-0.5 text-[12px]" defaultValue="auto" disabled>
+                      <option>Auto</option>
+                      <option>100 Mbps</option>
+                      <option>1000 Mbps</option>
+                    </select>
+                  </Field>
+                  <Field label="Duplex">
+                    <select className="rounded-none border border-[#7f9db9] bg-white px-1 py-0.5 text-[12px]" defaultValue="auto" disabled>
+                      <option>Auto</option>
+                      <option>Full</option>
+                    </select>
+                  </Field>
+                  <Field label="MAC Address">
+                    <input
+                      className="rounded-none border border-[#7f9db9] bg-white px-1 py-0.5 text-[12px] font-mono"
+                      value={i.mac}
+                      readOnly
+                    />
+                  </Field>
+                  <Field label="IP Address">
+                    <input
+                      className="rounded-none border border-[#7f9db9] bg-white px-1 py-0.5 text-[12px] font-mono"
+                      value={i.ip ?? ""}
+                      onChange={(e) =>
+                        patchIface(i.id, {
+                          ip: e.target.value || null,
+                          dhcpClient: false,
+                        })
+                      }
+                    />
+                  </Field>
+                  <Field label="Subnet Mask">
+                    <input
+                      className="rounded-none border border-[#7f9db9] bg-white px-1 py-0.5 text-[12px] font-mono"
+                      value={i.mask ?? ""}
+                      onChange={(e) =>
+                        patchIface(i.id, { mask: e.target.value || null })
+                      }
+                    />
+                  </Field>
+                  <p className="mt-2 text-[11px] text-[#666]">
+                    Media: {i.media} · Servers supportano tipicamente 2
+                    interfacce (Ethernet / fiber / modem / wireless).
+                  </p>
+                </Section>
+              );
+            })()}
+
+          {/* —— SERVICES —— */}
+          {top === "services" && svcNav === "http" && svc.http && (
+            <Section title="HTTP Service">
+              <label className="flex items-center gap-2">
                 <input
+                  type="checkbox"
+                  checked={svc.http.enabled}
+                  onChange={(e) =>
+                    patchSvc({
+                      ...svc,
+                      http: { ...svc.http!, enabled: e.target.checked },
+                    })
+                  }
+                />
+                HTTP On
+              </label>
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={svc.http.https ?? false}
+                  onChange={(e) =>
+                    patchSvc({
+                      ...svc,
+                      http: { ...svc.http!, https: e.target.checked },
+                    })
+                  }
+                />
+                HTTP Secure (HTTPS) On
+              </label>
+              <div className="mt-2 flex gap-2">
+                <select
+                  className="rounded-none border border-[#7f9db9] bg-white px-1 py-0.5 text-[12px]"
+                  value={activePage?.name ?? ""}
+                  onChange={(e) => setHttpPage(e.target.value)}
+                >
+                  {httpPages.map((p) => (
+                    <option key={p.name} value={p.name}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  className="rounded-none border border-[#003c74] bg-[#ece9d8] px-2 py-0.5 text-[12px] hover:bg-white disabled:opacity-50"
+                  onClick={() => {
+                    const name = window.prompt("Nome file HTML", "page.html");
+                    if (!name) return;
+                    patchSvc({
+                      ...svc,
+                      http: {
+                        ...svc.http!,
+                        pages: [
+                          ...httpPages,
+                          { name, body: `<html><body><h1>${name}</h1></body></html>` },
+                        ],
+                      },
+                    });
+                    setHttpPage(name);
+                  }}
+                >
+                  Add
+                </button>
+                <button
+                  type="button"
+                  className="rounded-none border border-[#003c74] bg-[#ece9d8] px-2 py-0.5 text-[12px] hover:bg-white disabled:opacity-50"
+                  disabled={!activePage || activePage.name === "index.html"}
+                  onClick={() => {
+                    if (!activePage) return;
+                    patchSvc({
+                      ...svc,
+                      http: {
+                        ...svc.http!,
+                        pages: httpPages.filter((p) => p.name !== activePage.name),
+                      },
+                    });
+                  }}
+                >
+                  Remove
+                </button>
+              </div>
+              {activePage && (
+                <textarea
+                  className="rounded-none border border-[#7f9db9] bg-white px-1 py-0.5 text-[12px] mt-2 min-h-[180px] w-full font-mono text-[11px]"
+                  value={activePage.body}
+                  onChange={(e) => {
+                    patchSvc({
+                      ...svc,
+                      http: {
+                        ...svc.http!,
+                        pages: httpPages.map((p) =>
+                          p.name === activePage.name
+                            ? { ...p, body: e.target.value }
+                            : p,
+                        ),
+                      },
+                    });
+                  }}
+                />
+              )}
+            </Section>
+          )}
+
+          {top === "services" && svcNav === "dhcp" && (
+            <Section title="DHCP Service">
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={dhcp.enabled}
+                  onChange={(e) =>
+                    patchSvc({
+                      ...svc,
+                      dhcp: { ...dhcp, enabled: e.target.checked },
+                    })
+                  }
+                />
+                Service On
+              </label>
+              <div className="mt-2 grid gap-1 rounded border border-[#aca899] p-2">
+                <div className="font-semibold">Add / edit pool</div>
+                {(
+                  [
+                    ["name", "Pool Name"],
+                    ["gateway", "Default Gateway"],
+                    ["dns", "DNS Server"],
+                    ["startIp", "Start IP Address"],
+                    ["mask", "Subnet Mask"],
+                  ] as const
+                ).map(([k, lab]) => (
+                  <Field key={k} label={lab}>
+                    <input
+                      className="rounded-none border border-[#7f9db9] bg-white px-1 py-0.5 text-[12px] font-mono"
+                      value={poolDraft[k]}
+                      onChange={(e) =>
+                        setPoolDraft({ ...poolDraft, [k]: e.target.value })
+                      }
+                    />
+                  </Field>
+                ))}
+                <Field label="Max Users">
+                  <input
+                    type="number"
+                    className="rounded-none border border-[#7f9db9] bg-white px-1 py-0.5 text-[12px] w-24"
+                    value={poolDraft.maxUsers}
+                    onChange={(e) =>
+                      setPoolDraft({
+                        ...poolDraft,
+                        maxUsers: Number(e.target.value) || 1,
+                      })
+                    }
+                  />
+                </Field>
+                <div className="flex gap-1">
+                  <button
+                    type="button"
+                    className="rounded-none border border-[#003c74] bg-[#ece9d8] px-2 py-0.5 text-[12px] hover:bg-white disabled:opacity-50"
+                    onClick={() => {
+                      if (!poolDraft.name.trim()) return;
+                      if (poolDraft.name === "serverPool") {
+                        window.alert(
+                          "serverPool è riservato (docs PT: non modificabile come nuovo).",
+                        );
+                        return;
+                      }
+                      const pool: DhcpPool = {
+                        name: poolDraft.name.trim(),
+                        gateway: poolDraft.gateway,
+                        dns: poolDraft.dns,
+                        startIp: poolDraft.startIp,
+                        mask: poolDraft.mask,
+                        maxUsers: poolDraft.maxUsers,
+                        leases: [],
+                      };
+                      patchSvc({
+                        ...svc,
+                        dhcp: {
+                          enabled: dhcp.enabled,
+                          pools: [...dhcp.pools, pool],
+                        },
+                      });
+                      setPoolDraft({ ...poolDraft, name: "" });
+                    }}
+                  >
+                    Add
+                  </button>
+                </div>
+              </div>
+              <div className="mt-2">
+                <div className="font-semibold">Pools</div>
+                {dhcp.pools.map((p, idx) => (
+                  <div
+                    key={p.name + idx}
+                    className="mt-1 flex items-start justify-between border border-[#ddd] p-1 font-mono text-[11px]"
+                  >
+                    <div>
+                      <div className="font-semibold">
+                        {p.name}
+                        {p.locked ? " (default)" : ""}
+                      </div>
+                      <div>
+                        {p.startIp}/{p.mask} gw {p.gateway} dns {p.dns} max{" "}
+                        {p.maxUsers}
+                      </div>
+                      <div className="text-[#666]">
+                        leases: {p.leases.length}
+                      </div>
+                    </div>
+                    {!p.locked && (
+                      <button
+                        type="button"
+                        className="text-rose-700"
+                        onClick={() =>
+                          patchSvc({
+                            ...svc,
+                            dhcp: {
+                              enabled: dhcp.enabled,
+                              pools: dhcp.pools.filter((_, i) => i !== idx),
+                            },
+                          })
+                        }
+                      >
+                        Remove
+                      </button>
+                    )}
+                  </div>
+                ))}
+                <p className="mt-1 text-[11px] text-[#666]">
+                  Il pool predefinito serverPool non può essere rimosso (docs
+                  PT).
+                </p>
+              </div>
+            </Section>
+          )}
+
+          {top === "services" && svcNav === "tftp" && (
+            <Section title="TFTP Service">
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={svc.tftp?.enabled ?? false}
+                  onChange={(e) =>
+                    patchSvc({
+                      ...svc,
+                      tftp: {
+                        enabled: e.target.checked,
+                        images: svc.tftp?.images ?? [],
+                      },
+                    })
+                  }
+                />
+                Service On
+              </label>
+              <p className="mt-1 text-[11px] text-[#666]">
+                Nessun parametro da impostare. Contiene immagini IOS per flash
+                di router/switch.
+              </p>
+              <ul className="mt-2 space-y-1">
+                {(svc.tftp?.images ?? []).map((img, idx) => (
+                  <li
+                    key={img.name}
+                    className="flex justify-between font-mono text-[11px]"
+                  >
+                    <span>
+                      {img.name} ({img.sizeKb} KB)
+                    </span>
+                    <button
+                      type="button"
+                      className="text-rose-700"
+                      onClick={() =>
+                        patchSvc({
+                          ...svc,
+                          tftp: {
+                            enabled: svc.tftp?.enabled ?? true,
+                            images: (svc.tftp?.images ?? []).filter(
+                              (_, i) => i !== idx,
+                            ),
+                          },
+                        })
+                      }
+                    >
+                      Remove
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </Section>
+          )}
+
+          {top === "services" && svcNav === "dns" && svc.dns && (
+            <Section title="DNS Service">
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={svc.dns.enabled}
+                  onChange={(e) =>
+                    patchSvc({
+                      ...svc,
+                      dns: { ...svc.dns!, enabled: e.target.checked },
+                    })
+                  }
+                />
+                Service On
+              </label>
+              <div className="mt-2 flex flex-wrap gap-1">
+                <input
+                  className="rounded-none border border-[#7f9db9] bg-white px-1 py-0.5 text-[12px] w-28 font-mono"
                   placeholder="Name"
                   value={dnsDraft.name}
                   onChange={(e) =>
                     setDnsDraft({ ...dnsDraft, name: e.target.value })
                   }
-                  className="w-28 border border-[#7a9cbc] px-1 py-0.5 font-mono"
                 />
                 <select
+                  className="rounded-none border border-[#7f9db9] bg-white px-1 py-0.5 text-[12px]"
                   value={dnsDraft.type}
                   onChange={(e) =>
                     setDnsDraft({
                       ...dnsDraft,
-                      type: e.target.value as typeof dnsDraft.type,
+                      type: e.target.value as DnsRecord["type"],
                     })
                   }
-                  className="border border-[#7a9cbc] px-1 py-0.5"
                 >
-                  <option value="A">A</option>
+                  <option value="A">A Record</option>
                   <option value="CNAME">CNAME</option>
-                  <option value="NS">NS</option>
                   <option value="SOA">SOA</option>
+                  <option value="NS">NS</option>
                 </select>
                 {dnsDraft.type === "A" ? (
                   <input
+                    className="rounded-none border border-[#7f9db9] bg-white px-1 py-0.5 text-[12px] w-32 font-mono"
                     placeholder="Address"
                     value={dnsDraft.ip}
                     onChange={(e) =>
                       setDnsDraft({ ...dnsDraft, ip: e.target.value })
                     }
-                    className="w-32 border border-[#7a9cbc] px-1 py-0.5 font-mono"
                   />
                 ) : (
                   <input
-                    placeholder="Host / Target"
+                    className="rounded-none border border-[#7f9db9] bg-white px-1 py-0.5 text-[12px] w-32 font-mono"
+                    placeholder="Host / Server Name"
                     value={dnsDraft.target}
                     onChange={(e) =>
                       setDnsDraft({ ...dnsDraft, target: e.target.value })
                     }
-                    className="w-32 border border-[#7a9cbc] px-1 py-0.5 font-mono"
                   />
                 )}
                 <button
                   type="button"
-                  className="border border-[#7a9cbc] bg-[#e8f0f8] px-2 py-0.5"
+                  className="rounded-none border border-[#003c74] bg-[#ece9d8] px-2 py-0.5 text-[12px] hover:bg-white disabled:opacity-50"
                   onClick={() => {
                     if (!dnsDraft.name.trim()) return;
                     const rec: DnsRecord = {
                       name: dnsDraft.name.trim(),
                       type: dnsDraft.type,
-                      ip:
-                        dnsDraft.type === "A"
-                          ? dnsDraft.ip.trim()
-                          : undefined,
+                      ip: dnsDraft.type === "A" ? dnsDraft.ip : undefined,
                       target:
-                        dnsDraft.type !== "A"
-                          ? dnsDraft.target.trim()
-                          : undefined,
+                        dnsDraft.type !== "A" ? dnsDraft.target : undefined,
                     };
-                    patch({
+                    patchSvc({
                       ...svc,
                       dns: {
                         ...svc.dns!,
@@ -408,11 +821,11 @@ export function ServerServices({
                   Add
                 </button>
               </div>
-              <ul className="space-y-0.5">
+              <ul className="mt-2 space-y-0.5">
                 {svc.dns.records.map((r, idx) => (
                   <li
                     key={`${r.name}-${idx}`}
-                    className="flex items-center justify-between font-mono text-[11px]"
+                    className="flex justify-between font-mono text-[11px]"
                   >
                     <span>
                       {(r.type ?? "A").padEnd(6)} {r.name} →{" "}
@@ -420,9 +833,9 @@ export function ServerServices({
                     </span>
                     <button
                       type="button"
-                      className="text-rose-600"
+                      className="text-rose-700"
                       onClick={() =>
-                        patch({
+                        patchSvc({
                           ...svc,
                           dns: {
                             ...svc.dns!,
@@ -436,609 +849,728 @@ export function ServerServices({
                   </li>
                 ))}
               </ul>
-            </div>
-          </>
-        )}
-
-        {tab === "http" && svc.http && (
-          <>
-            <label className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={svc.http.enabled}
-                onChange={(e) =>
-                  patch({
-                    ...svc,
-                    http: { ...svc.http!, enabled: e.target.checked },
-                  })
-                }
-              />
-              HTTP On
-            </label>
-            <label className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={svc.http.https ?? false}
-                onChange={(e) =>
-                  patch({
-                    ...svc,
-                    http: { ...svc.http!, https: e.target.checked },
-                  })
-                }
-              />
-              HTTPS On
-            </label>
-            <label className="flex flex-col gap-1">
-              <span>Page title</span>
-              <input
-                value={svc.http.title}
-                onChange={(e) =>
-                  patch({
-                    ...svc,
-                    http: { ...svc.http!, title: e.target.value },
-                  })
-                }
-                className="border border-[#7a9cbc] px-1 py-0.5"
-              />
-            </label>
-            <label className="flex flex-col gap-1">
-              <span>index.html / body</span>
-              <textarea
-                value={svc.http.body}
-                onChange={(e) =>
-                  patch({
-                    ...svc,
-                    http: { ...svc.http!, body: e.target.value },
-                  })
-                }
-                rows={6}
-                className="border border-[#7a9cbc] px-1 py-0.5 font-mono"
-              />
-            </label>
-            {(svc.http.pages ?? []).length > 0 && (
-              <div className="rounded border border-[#d4d4d4] bg-white p-2">
-                <div className="mb-1 font-medium">Files</div>
-                {svc.http.pages!.map((p) => (
-                  <div key={p.name} className="font-mono text-[11px]">
-                    {p.name}
-                  </div>
-                ))}
-              </div>
-            )}
-          </>
-        )}
-
-        {tab === "email" && (
-          <>
-            {!svc.email && (
               <button
                 type="button"
-                className="border border-[#7a9cbc] bg-[#e8f0f8] px-2 py-1"
+                className="rounded-none border border-[#003c74] bg-[#ece9d8] px-2 py-0.5 text-[12px] hover:bg-white disabled:opacity-50 mt-2"
                 onClick={() =>
-                  patch({
-                    ...svc,
-                    email: {
-                      enabled: true,
-                      smtp: true,
-                      pop3: true,
-                      domain: svc.domain ?? "lab.local",
-                      users: [],
-                    },
-                  })
+                  window.alert(
+                    `DNS Cache (${svc.dns?.cache?.length ?? 0} voci)\n` +
+                      (svc.dns?.cache ?? [])
+                        .map((c) => `${c.name} → ${c.ip}`)
+                        .join("\n") ||
+                      "(vuota)",
+                  )
                 }
               >
-                Abilita Email service
+                DNS Cache
               </button>
-            )}
-            {svc.email && (
-              <>
-                <label className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    checked={svc.email.enabled}
-                    onChange={(e) =>
-                      patch({
-                        ...svc,
-                        email: { ...svc.email!, enabled: e.target.checked },
-                      })
-                    }
-                  />
-                  Service On
-                </label>
-                <label className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    checked={svc.email.smtp}
-                    onChange={(e) =>
-                      patch({
-                        ...svc,
-                        email: { ...svc.email!, smtp: e.target.checked },
-                      })
-                    }
-                  />
-                  SMTP
-                </label>
-                <label className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    checked={svc.email.pop3}
-                    onChange={(e) =>
-                      patch({
-                        ...svc,
-                        email: { ...svc.email!, pop3: e.target.checked },
-                      })
-                    }
-                  />
-                  POP3
-                </label>
-                <label className="flex items-center justify-between gap-2">
-                  <span>Domain Name</span>
-                  <div className="flex gap-1">
-                    <input
-                      value={svc.email.domain}
-                      onChange={(e) =>
-                        patch({
-                          ...svc,
-                          email: { ...svc.email!, domain: e.target.value },
-                        })
-                      }
-                      className="w-36 border border-[#7a9cbc] px-1 py-0.5 font-mono"
-                    />
+            </Section>
+          )}
+
+          {top === "services" && svcNav === "syslog" && (
+            <Section title="SYSLOG Service">
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={svc.syslog?.enabled ?? false}
+                  onChange={(e) =>
+                    patchSvc({
+                      ...svc,
+                      syslog: {
+                        enabled: e.target.checked,
+                        entries: svc.syslog?.entries ?? [],
+                      },
+                    })
+                  }
+                />
+                Service On
+              </label>
+              <p className="mt-1 text-[11px] text-[#666]">
+                Nessun parametro. Riceve log da router/switch (Time, HostName,
+                Message).
+              </p>
+              <table className="mt-2 w-full border-collapse text-[11px]">
+                <thead>
+                  <tr className="bg-[#ece9d8] text-left">
+                    <th className="border p-1">Time</th>
+                    <th className="border p-1">HostName</th>
+                    <th className="border p-1">Message</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(svc.syslog?.entries ?? []).length === 0 ? (
+                    <tr>
+                      <td className="border p-1 text-[#888]" colSpan={3}>
+                        (vuoto)
+                      </td>
+                    </tr>
+                  ) : (
+                    svc.syslog!.entries.map((e, i) => (
+                      <tr key={i}>
+                        <td className="border p-1 font-mono">{e.time}</td>
+                        <td className="border p-1">{e.hostname}</td>
+                        <td className="border p-1">{e.message}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </Section>
+          )}
+
+          {top === "services" && svcNav === "aaa" && (
+            <Section title="AAA Service (RADIUS / TACACS)">
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={svc.aaa?.enabled ?? false}
+                  onChange={(e) =>
+                    patchSvc({
+                      ...svc,
+                      aaa: {
+                        enabled: e.target.checked,
+                        clients: svc.aaa?.clients ?? [],
+                        users: svc.aaa?.users ?? [],
+                      },
+                    })
+                  }
+                />
+                Service On
+              </label>
+              <div className="mt-2 font-semibold">Network clients</div>
+              <div className="flex flex-wrap gap-1">
+                <input
+                  className="rounded-none border border-[#7f9db9] bg-white px-1 py-0.5 text-[12px] w-24"
+                  placeholder="Client Name"
+                  value={aaaClient.name}
+                  onChange={(e) =>
+                    setAaaClient({ ...aaaClient, name: e.target.value })
+                  }
+                />
+                <input
+                  className="rounded-none border border-[#7f9db9] bg-white px-1 py-0.5 text-[12px] w-28 font-mono"
+                  placeholder="Client IP"
+                  value={aaaClient.ip}
+                  onChange={(e) =>
+                    setAaaClient({ ...aaaClient, ip: e.target.value })
+                  }
+                />
+                <input
+                  className="rounded-none border border-[#7f9db9] bg-white px-1 py-0.5 text-[12px] w-20"
+                  placeholder="Secret"
+                  value={aaaClient.secret}
+                  onChange={(e) =>
+                    setAaaClient({ ...aaaClient, secret: e.target.value })
+                  }
+                />
+                <select
+                  className="rounded-none border border-[#7f9db9] bg-white px-1 py-0.5 text-[12px]"
+                  value={aaaClient.type}
+                  onChange={(e) =>
+                    setAaaClient({
+                      ...aaaClient,
+                      type: e.target.value as AaaClient["type"],
+                    })
+                  }
+                >
+                  <option value="radius">Radius</option>
+                  <option value="tacacs">Tacacs</option>
+                </select>
+                <button
+                  type="button"
+                  className="rounded-none border border-[#003c74] bg-[#ece9d8] px-2 py-0.5 text-[12px] hover:bg-white disabled:opacity-50"
+                  onClick={() => {
+                    if (!aaaClient.name || !aaaClient.ip) return;
+                    patchSvc({
+                      ...svc,
+                      aaa: {
+                        enabled: svc.aaa?.enabled ?? true,
+                        clients: [
+                          ...(svc.aaa?.clients ?? []),
+                          { ...aaaClient },
+                        ],
+                        users: svc.aaa?.users ?? [],
+                      },
+                    });
+                    setAaaClient({
+                      name: "",
+                      ip: "",
+                      secret: "cisco",
+                      type: "radius",
+                    });
+                  }}
+                >
+                  +
+                </button>
+              </div>
+              <ul className="mt-1">
+                {(svc.aaa?.clients ?? []).map((c, idx) => (
+                  <li
+                    key={idx}
+                    className="flex justify-between font-mono text-[11px]"
+                  >
+                    <span>
+                      {c.type} {c.name} {c.ip}
+                    </span>
                     <button
                       type="button"
-                      className="border border-[#7a9cbc] bg-[#e8f0f8] px-2"
+                      className="text-rose-700"
                       onClick={() =>
-                        patch({
+                        patchSvc({
                           ...svc,
-                          domain: svc.email!.domain,
-                          email: { ...svc.email! },
+                          aaa: {
+                            ...svc.aaa!,
+                            clients: svc.aaa!.clients.filter((_, i) => i !== idx),
+                          },
                         })
                       }
                     >
-                      Set
+                      −
                     </button>
-                  </div>
-                </label>
-                <div className="rounded border border-[#d4d4d4] bg-white p-2">
-                  <div className="mb-1 font-medium">User accounts</div>
-                  <div className="mb-2 flex flex-wrap gap-1">
-                    <input
-                      placeholder="User"
-                      value={userDraft.username}
-                      onChange={(e) =>
-                        setUserDraft({
-                          ...userDraft,
-                          username: e.target.value,
-                        })
-                      }
-                      className="w-28 border border-[#7a9cbc] px-1 py-0.5"
-                    />
-                    <input
-                      placeholder="Password"
-                      type="password"
-                      value={userDraft.password}
-                      onChange={(e) =>
-                        setUserDraft({
-                          ...userDraft,
-                          password: e.target.value,
-                        })
-                      }
-                      className="w-28 border border-[#7a9cbc] px-1 py-0.5"
-                    />
+                  </li>
+                ))}
+              </ul>
+              <div className="mt-3 font-semibold">Authorized users</div>
+              <div className="flex flex-wrap gap-1">
+                <input
+                  className="rounded-none border border-[#7f9db9] bg-white px-1 py-0.5 text-[12px] w-28"
+                  placeholder="UserName"
+                  value={aaaUser.username}
+                  onChange={(e) =>
+                    setAaaUser({ ...aaaUser, username: e.target.value })
+                  }
+                />
+                <input
+                  className="rounded-none border border-[#7f9db9] bg-white px-1 py-0.5 text-[12px] w-28"
+                  placeholder="Password"
+                  value={aaaUser.password}
+                  onChange={(e) =>
+                    setAaaUser({ ...aaaUser, password: e.target.value })
+                  }
+                />
+                <button
+                  type="button"
+                  className="rounded-none border border-[#003c74] bg-[#ece9d8] px-2 py-0.5 text-[12px] hover:bg-white disabled:opacity-50"
+                  onClick={() => {
+                    if (!aaaUser.username.trim()) return;
+                    const u: ServerUser = {
+                      username: aaaUser.username.trim(),
+                      password: aaaUser.password || "cisco",
+                    };
+                    patchSvc({
+                      ...svc,
+                      aaa: {
+                        enabled: svc.aaa?.enabled ?? true,
+                        clients: svc.aaa?.clients ?? [],
+                        users: [...(svc.aaa?.users ?? []), u],
+                      },
+                    });
+                    setAaaUser({ username: "", password: "" });
+                  }}
+                >
+                  +
+                </button>
+              </div>
+              <ul className="mt-1">
+                {(svc.aaa?.users ?? []).map((u, idx) => (
+                  <li
+                    key={idx}
+                    className="flex justify-between font-mono text-[11px]"
+                  >
+                    <span>{u.username}</span>
                     <button
                       type="button"
-                      className="border border-[#7a9cbc] bg-[#e8f0f8] px-2"
-                      onClick={() => {
-                        if (!userDraft.username.trim()) return;
-                        const u: ServerUser = {
-                          username: userDraft.username.trim(),
-                          password: userDraft.password || "cisco",
-                        };
-                        patch({
+                      className="text-rose-700"
+                      onClick={() =>
+                        patchSvc({
+                          ...svc,
+                          aaa: {
+                            ...svc.aaa!,
+                            users: svc.aaa!.users.filter((_, i) => i !== idx),
+                          },
+                        })
+                      }
+                    >
+                      −
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </Section>
+          )}
+
+          {top === "services" && svcNav === "ntp" && (
+            <Section title="NTP Service">
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={svc.ntp?.enabled ?? false}
+                  onChange={(e) =>
+                    patchSvc({
+                      ...svc,
+                      ntp: {
+                        enabled: e.target.checked,
+                        datetime:
+                          svc.ntp?.datetime ?? new Date().toISOString(),
+                        authEnabled: svc.ntp?.authEnabled ?? false,
+                        authKey: svc.ntp?.authKey ?? "1",
+                        authPassword: svc.ntp?.authPassword ?? "",
+                      },
+                    })
+                  }
+                />
+                Service On
+              </label>
+              <Field label="Date / Time">
+                <input
+                  className="rounded-none border border-[#7f9db9] bg-white px-1 py-0.5 text-[12px] font-mono"
+                  type="datetime-local"
+                  value={
+                    svc.ntp?.datetime
+                      ? svc.ntp.datetime.slice(0, 16)
+                      : ""
+                  }
+                  onChange={(e) =>
+                    patchSvc({
+                      ...svc,
+                      ntp: {
+                        enabled: svc.ntp?.enabled ?? true,
+                        datetime: new Date(e.target.value).toISOString(),
+                        authEnabled: svc.ntp?.authEnabled ?? false,
+                        authKey: svc.ntp?.authKey ?? "1",
+                        authPassword: svc.ntp?.authPassword ?? "",
+                      },
+                    })
+                  }
+                />
+              </Field>
+              <label className="mt-2 flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={svc.ntp?.authEnabled ?? false}
+                  onChange={(e) =>
+                    patchSvc({
+                      ...svc,
+                      ntp: {
+                        ...(svc.ntp ?? {
+                          enabled: true,
+                          datetime: new Date().toISOString(),
+                          authKey: "1",
+                          authPassword: "",
+                        }),
+                        authEnabled: e.target.checked,
+                      },
+                    })
+                  }
+                />
+                Authentication Enable
+              </label>
+              {(svc.ntp?.authEnabled ?? false) && (
+                <>
+                  <Field label="Key">
+                    <input
+                      className="rounded-none border border-[#7f9db9] bg-white px-1 py-0.5 text-[12px] w-24"
+                      value={svc.ntp?.authKey ?? ""}
+                      onChange={(e) =>
+                        patchSvc({
+                          ...svc,
+                          ntp: { ...svc.ntp!, authKey: e.target.value },
+                        })
+                      }
+                    />
+                  </Field>
+                  <Field label="Password">
+                    <input
+                      className="rounded-none border border-[#7f9db9] bg-white px-1 py-0.5 text-[12px] w-32"
+                      value={svc.ntp?.authPassword ?? ""}
+                      onChange={(e) =>
+                        patchSvc({
+                          ...svc,
+                          ntp: { ...svc.ntp!, authPassword: e.target.value },
+                        })
+                      }
+                    />
+                  </Field>
+                </>
+              )}
+            </Section>
+          )}
+
+          {top === "services" && svcNav === "email" && (
+            <Section title="Email Service (SMTP / POP3)">
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={svc.email?.enabled ?? false}
+                  onChange={(e) =>
+                    patchSvc({
+                      ...svc,
+                      email: {
+                        enabled: e.target.checked,
+                        smtp: svc.email?.smtp ?? true,
+                        pop3: svc.email?.pop3 ?? true,
+                        domain: svc.email?.domain ?? "lab.local",
+                        users: svc.email?.users ?? [],
+                      },
+                    })
+                  }
+                />
+                Service On
+              </label>
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={svc.email?.smtp ?? true}
+                  onChange={(e) =>
+                    patchSvc({
+                      ...svc,
+                      email: { ...svc.email!, smtp: e.target.checked },
+                    })
+                  }
+                />
+                SMTP
+              </label>
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={svc.email?.pop3 ?? true}
+                  onChange={(e) =>
+                    patchSvc({
+                      ...svc,
+                      email: { ...svc.email!, pop3: e.target.checked },
+                    })
+                  }
+                />
+                POP3
+              </label>
+              <Field label="Domain Name">
+                <div className="flex gap-1">
+                  <input
+                    className="rounded-none border border-[#7f9db9] bg-white px-1 py-0.5 text-[12px] font-mono"
+                    value={svc.email?.domain ?? ""}
+                    onChange={(e) =>
+                      patchSvc({
+                        ...svc,
+                        email: {
+                          enabled: svc.email?.enabled ?? true,
+                          smtp: svc.email?.smtp ?? true,
+                          pop3: svc.email?.pop3 ?? true,
+                          domain: e.target.value,
+                          users: svc.email?.users ?? [],
+                        },
+                      })
+                    }
+                  />
+                  <button type="button" className="rounded-none border border-[#003c74] bg-[#ece9d8] px-2 py-0.5 text-[12px] hover:bg-white disabled:opacity-50">
+                    Set
+                  </button>
+                </div>
+              </Field>
+              <div className="mt-2 font-semibold">User accounts</div>
+              <div className="flex flex-wrap gap-1">
+                <input
+                  className="rounded-none border border-[#7f9db9] bg-white px-1 py-0.5 text-[12px] w-28"
+                  placeholder="User name"
+                  value={emailUser.username}
+                  onChange={(e) =>
+                    setEmailUser({ ...emailUser, username: e.target.value })
+                  }
+                />
+                <input
+                  className="rounded-none border border-[#7f9db9] bg-white px-1 py-0.5 text-[12px] w-28"
+                  placeholder="Password"
+                  value={emailUser.password}
+                  onChange={(e) =>
+                    setEmailUser({ ...emailUser, password: e.target.value })
+                  }
+                />
+                <button
+                  type="button"
+                  className="rounded-none border border-[#003c74] bg-[#ece9d8] px-2 py-0.5 text-[12px] hover:bg-white disabled:opacity-50"
+                  onClick={() => {
+                    if (!emailUser.username.trim()) return;
+                    patchSvc({
+                      ...svc,
+                      email: {
+                        enabled: svc.email?.enabled ?? true,
+                        smtp: svc.email?.smtp ?? true,
+                        pop3: svc.email?.pop3 ?? true,
+                        domain: svc.email?.domain ?? "lab.local",
+                        users: [
+                          ...(svc.email?.users ?? []),
+                          {
+                            username: emailUser.username.trim(),
+                            password: emailUser.password || "cisco",
+                          },
+                        ],
+                      },
+                    });
+                    setEmailUser({ username: "", password: "" });
+                  }}
+                >
+                  Add
+                </button>
+              </div>
+              <ul className="mt-1">
+                {(svc.email?.users ?? []).map((u, idx) => (
+                  <li
+                    key={idx}
+                    className="flex justify-between font-mono text-[11px]"
+                  >
+                    <span>
+                      {u.username}@{svc.email?.domain}
+                    </span>
+                    <button
+                      type="button"
+                      className="text-rose-700"
+                      onClick={() =>
+                        patchSvc({
                           ...svc,
                           email: {
                             ...svc.email!,
-                            users: [...svc.email!.users, u],
+                            users: svc.email!.users.filter((_, i) => i !== idx),
                           },
-                        });
-                        setUserDraft({ username: "", password: "" });
-                      }}
+                        })
+                      }
                     >
-                      Add
+                      Delete
                     </button>
-                  </div>
-                  {svc.email.users.map((u, idx) => (
-                    <div
-                      key={u.username + idx}
-                      className="flex justify-between font-mono text-[11px]"
-                    >
-                      <span>
-                        {u.username}@{svc.email!.domain}
-                      </span>
-                      <button
-                        type="button"
-                        className="text-rose-600"
-                        onClick={() =>
-                          patch({
-                            ...svc,
-                            email: {
-                              ...svc.email!,
-                              users: svc.email!.users.filter((_, i) => i !== idx),
-                            },
-                          })
-                        }
-                      >
-                        Delete
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </>
-            )}
-          </>
-        )}
+                  </li>
+                ))}
+              </ul>
+            </Section>
+          )}
 
-        {tab === "ftp" && (
-          <>
-            {!svc.ftp && (
-              <button
-                type="button"
-                className="border border-[#7a9cbc] bg-[#e8f0f8] px-2 py-1"
-                onClick={() =>
-                  patch({
-                    ...svc,
-                    ftp: { enabled: true, accounts: [], files: [] },
-                  })
-                }
-              >
-                Abilita FTP service
-              </button>
-            )}
-            {svc.ftp && (
-              <>
-                <label className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    checked={svc.ftp.enabled}
-                    onChange={(e) =>
-                      patch({
-                        ...svc,
-                        ftp: { ...svc.ftp!, enabled: e.target.checked },
-                      })
-                    }
-                  />
-                  Service On
-                </label>
-                <div className="rounded border border-[#d4d4d4] bg-white p-2">
-                  <div className="mb-1 font-medium">FTP accounts</div>
-                  <div className="mb-2 flex flex-wrap items-center gap-1">
+          {top === "services" && svcNav === "ftp" && (
+            <Section title="FTP Service">
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={svc.ftp?.enabled ?? false}
+                  onChange={(e) =>
+                    patchSvc({
+                      ...svc,
+                      ftp: {
+                        enabled: e.target.checked,
+                        accounts: svc.ftp?.accounts ?? [],
+                        files: svc.ftp?.files ?? [],
+                      },
+                    })
+                  }
+                />
+                Service On
+              </label>
+              <div className="mt-2 font-semibold">FTP accounts</div>
+              <div className="flex flex-wrap items-center gap-1">
+                <input
+                  className="rounded-none border border-[#7f9db9] bg-white px-1 py-0.5 text-[12px] w-24"
+                  placeholder="UserName"
+                  value={ftpDraft.username}
+                  onChange={(e) =>
+                    setFtpDraft({ ...ftpDraft, username: e.target.value })
+                  }
+                />
+                <input
+                  className="rounded-none border border-[#7f9db9] bg-white px-1 py-0.5 text-[12px] w-24"
+                  placeholder="Password"
+                  value={ftpDraft.password}
+                  onChange={(e) =>
+                    setFtpDraft({ ...ftpDraft, password: e.target.value })
+                  }
+                />
+                {(
+                  [
+                    ["write", "Write"],
+                    ["read", "Read"],
+                    ["delete", "Delete"],
+                    ["rename", "Rename"],
+                    ["list", "List"],
+                  ] as const
+                ).map(([k, lab]) => (
+                  <label key={k} className="flex items-center gap-0.5 text-[11px]">
                     <input
-                      placeholder="User"
-                      value={ftpDraft.username}
+                      type="checkbox"
+                      checked={ftpDraft[k]}
                       onChange={(e) =>
-                        setFtpDraft({ ...ftpDraft, username: e.target.value })
+                        setFtpDraft({ ...ftpDraft, [k]: e.target.checked })
                       }
-                      className="w-24 border border-[#7a9cbc] px-1 py-0.5"
                     />
-                    <input
-                      placeholder="Pass"
-                      value={ftpDraft.password}
-                      onChange={(e) =>
-                        setFtpDraft({ ...ftpDraft, password: e.target.value })
-                      }
-                      className="w-24 border border-[#7a9cbc] px-1 py-0.5"
-                    />
-                    {(
-                      [
-                        ["write", "W"],
-                        ["read", "R"],
-                        ["delete", "D"],
-                        ["rename", "N"],
-                        ["list", "L"],
-                      ] as const
-                    ).map(([k, lab]) => (
-                      <label key={k} className="flex items-center gap-0.5">
-                        <input
-                          type="checkbox"
-                          checked={ftpDraft[k]}
-                          onChange={(e) =>
-                            setFtpDraft({ ...ftpDraft, [k]: e.target.checked })
-                          }
-                        />
-                        {lab}
-                      </label>
-                    ))}
+                    {lab}
+                  </label>
+                ))}
+                <button
+                  type="button"
+                  className="rounded-none border border-[#003c74] bg-[#ece9d8] px-2 py-0.5 text-[12px] hover:bg-white disabled:opacity-50"
+                  onClick={() => {
+                    if (!ftpDraft.username.trim()) return;
+                    const acc: FtpAccount = {
+                      username: ftpDraft.username.trim(),
+                      password: ftpDraft.password || "cisco",
+                      permissions: {
+                        write: ftpDraft.write,
+                        read: ftpDraft.read,
+                        delete: ftpDraft.delete,
+                        rename: ftpDraft.rename,
+                        list: ftpDraft.list,
+                      },
+                    };
+                    patchSvc({
+                      ...svc,
+                      ftp: {
+                        enabled: svc.ftp?.enabled ?? true,
+                        accounts: [...(svc.ftp?.accounts ?? []), acc],
+                        files: svc.ftp?.files ?? [],
+                      },
+                    });
+                    setFtpDraft({ ...ftpDraft, username: "", password: "cisco" });
+                  }}
+                >
+                  Add
+                </button>
+              </div>
+              <ul className="mt-1">
+                {(svc.ftp?.accounts ?? []).map((a, idx) => (
+                  <li
+                    key={idx}
+                    className="flex justify-between font-mono text-[11px]"
+                  >
+                    <span>
+                      {a.username} [
+                      {[
+                        a.permissions.write && "W",
+                        a.permissions.read && "R",
+                        a.permissions.delete && "D",
+                        a.permissions.rename && "N",
+                        a.permissions.list && "L",
+                      ]
+                        .filter(Boolean)
+                        .join("")}
+                      ]
+                    </span>
                     <button
                       type="button"
-                      className="border border-[#7a9cbc] bg-[#e8f0f8] px-2"
-                      onClick={() => {
-                        if (!ftpDraft.username.trim()) return;
-                        const acc: FtpAccount = {
-                          username: ftpDraft.username.trim(),
-                          password: ftpDraft.password || "cisco",
-                          permissions: {
-                            write: ftpDraft.write,
-                            read: ftpDraft.read,
-                            delete: ftpDraft.delete,
-                            rename: ftpDraft.rename,
-                            list: ftpDraft.list,
-                          },
-                        };
-                        patch({
+                      className="text-rose-700"
+                      onClick={() =>
+                        patchSvc({
                           ...svc,
                           ftp: {
                             ...svc.ftp!,
-                            accounts: [...svc.ftp!.accounts, acc],
+                            accounts: svc.ftp!.accounts.filter(
+                              (_, i) => i !== idx,
+                            ),
                           },
-                        });
-                        setFtpDraft({
-                          ...ftpDraft,
-                          username: "",
-                          password: "",
-                        });
-                      }}
+                        })
+                      }
                     >
-                      Add
+                      Delete
                     </button>
-                  </div>
-                  {svc.ftp.accounts.map((a, idx) => (
-                    <div
-                      key={a.username + idx}
-                      className="flex justify-between font-mono text-[11px]"
-                    >
-                      <span>
-                        {a.username} [
-                        {[
-                          a.permissions.write && "W",
-                          a.permissions.read && "R",
-                          a.permissions.delete && "D",
-                          a.permissions.rename && "N",
-                          a.permissions.list && "L",
-                        ]
-                          .filter(Boolean)
-                          .join("")}
-                        ]
-                      </span>
-                      <button
-                        type="button"
-                        className="text-rose-600"
-                        onClick={() =>
-                          patch({
-                            ...svc,
-                            ftp: {
-                              ...svc.ftp!,
-                              accounts: svc.ftp!.accounts.filter(
-                                (_, i) => i !== idx,
-                              ),
-                            },
-                          })
-                        }
-                      >
-                        Delete
-                      </button>
-                    </div>
-                  ))}
-                </div>
-                <div className="rounded border border-[#d4d4d4] bg-white p-2">
-                  <div className="mb-1 font-medium">Files</div>
-                  {(svc.ftp.files ?? []).map((f) => (
-                    <div key={f.name} className="font-mono text-[11px]">
+                  </li>
+                ))}
+              </ul>
+              <div className="mt-3 font-semibold">Files</div>
+              <ul>
+                {(svc.ftp?.files ?? []).map((f, idx) => (
+                  <li
+                    key={f.name}
+                    className="flex justify-between font-mono text-[11px]"
+                  >
+                    <span>
                       {f.name} ({f.size} B)
-                    </div>
-                  ))}
-                  {(svc.ftp.files ?? []).length === 0 && (
-                    <div className="text-[#888]">Nessun file</div>
-                  )}
-                </div>
-              </>
-            )}
-          </>
-        )}
-
-        {tab === "aaa" && (
-          <>
-            {!svc.aaa && (
-              <button
-                type="button"
-                className="border border-[#7a9cbc] bg-[#e8f0f8] px-2 py-1"
-                onClick={() =>
-                  patch({
-                    ...svc,
-                    aaa: { enabled: true, clients: [], users: [] },
-                  })
-                }
-              >
-                Abilita AAA (RADIUS/TACACS)
-              </button>
-            )}
-            {svc.aaa && (
-              <>
-                <label className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    checked={svc.aaa.enabled}
-                    onChange={(e) =>
-                      patch({
-                        ...svc,
-                        aaa: { ...svc.aaa!, enabled: e.target.checked },
-                      })
-                    }
-                  />
-                  Service On
-                </label>
-                <div className="rounded border border-[#d4d4d4] bg-white p-2">
-                  <div className="mb-1 font-medium">Network clients</div>
-                  <div className="mb-2 flex flex-wrap gap-1">
-                    <input
-                      placeholder="Client Name"
-                      value={aaaClient.name}
-                      onChange={(e) =>
-                        setAaaClient({ ...aaaClient, name: e.target.value })
-                      }
-                      className="w-24 border border-[#7a9cbc] px-1 py-0.5"
-                    />
-                    <input
-                      placeholder="Client IP"
-                      value={aaaClient.ip}
-                      onChange={(e) =>
-                        setAaaClient({ ...aaaClient, ip: e.target.value })
-                      }
-                      className="w-28 border border-[#7a9cbc] px-1 py-0.5 font-mono"
-                    />
-                    <input
-                      placeholder="Secret"
-                      value={aaaClient.secret}
-                      onChange={(e) =>
-                        setAaaClient({ ...aaaClient, secret: e.target.value })
-                      }
-                      className="w-20 border border-[#7a9cbc] px-1 py-0.5"
-                    />
-                    <select
-                      value={aaaClient.type}
-                      onChange={(e) =>
-                        setAaaClient({
-                          ...aaaClient,
-                          type: e.target.value as "radius" | "tacacs",
-                        })
-                      }
-                      className="border border-[#7a9cbc] px-1 py-0.5"
-                    >
-                      <option value="radius">Radius</option>
-                      <option value="tacacs">Tacacs</option>
-                    </select>
+                    </span>
                     <button
                       type="button"
-                      className="border border-[#7a9cbc] bg-[#e8f0f8] px-2"
-                      onClick={() => {
-                        if (!aaaClient.name.trim() || !aaaClient.ip.trim())
-                          return;
-                        patch({
+                      className="text-rose-700"
+                      onClick={() =>
+                        patchSvc({
                           ...svc,
-                          aaa: {
-                            ...svc.aaa!,
-                            clients: [
-                              ...svc.aaa!.clients,
-                              { ...aaaClient, name: aaaClient.name.trim() },
-                            ],
+                          ftp: {
+                            ...svc.ftp!,
+                            files: svc.ftp!.files.filter((_, i) => i !== idx),
                           },
-                        });
-                        setAaaClient({
-                          name: "",
-                          ip: "",
-                          secret: "cisco",
-                          type: "radius",
-                        });
-                      }}
-                    >
-                      +
-                    </button>
-                  </div>
-                  {svc.aaa.clients.map((c, idx) => (
-                    <div
-                      key={c.name + idx}
-                      className="flex justify-between font-mono text-[11px]"
-                    >
-                      <span>
-                        {c.type.toUpperCase()} {c.name} {c.ip}
-                      </span>
-                      <button
-                        type="button"
-                        className="text-rose-600"
-                        onClick={() =>
-                          patch({
-                            ...svc,
-                            aaa: {
-                              ...svc.aaa!,
-                              clients: svc.aaa!.clients.filter(
-                                (_, i) => i !== idx,
-                              ),
-                            },
-                          })
-                        }
-                      >
-                        −
-                      </button>
-                    </div>
-                  ))}
-                </div>
-                <div className="rounded border border-[#d4d4d4] bg-white p-2">
-                  <div className="mb-1 font-medium">Authorized users</div>
-                  <div className="mb-2 flex flex-wrap gap-1">
-                    <input
-                      placeholder="UserName"
-                      value={userDraft.username}
-                      onChange={(e) =>
-                        setUserDraft({
-                          ...userDraft,
-                          username: e.target.value,
                         })
                       }
-                      className="w-28 border border-[#7a9cbc] px-1 py-0.5"
-                    />
-                    <input
-                      placeholder="Password"
-                      value={userDraft.password}
-                      onChange={(e) =>
-                        setUserDraft({
-                          ...userDraft,
-                          password: e.target.value,
-                        })
-                      }
-                      className="w-28 border border-[#7a9cbc] px-1 py-0.5"
-                    />
-                    <button
-                      type="button"
-                      className="border border-[#7a9cbc] bg-[#e8f0f8] px-2"
-                      onClick={() => {
-                        if (!userDraft.username.trim()) return;
-                        patch({
-                          ...svc,
-                          aaa: {
-                            ...svc.aaa!,
-                            users: [
-                              ...svc.aaa!.users,
-                              {
-                                username: userDraft.username.trim(),
-                                password: userDraft.password || "cisco",
-                              },
-                            ],
-                          },
-                        });
-                        setUserDraft({ username: "", password: "" });
-                      }}
                     >
-                      +
+                      Remove
                     </button>
-                  </div>
-                  {svc.aaa.users.map((u, idx) => (
-                    <div
-                      key={u.username + idx}
-                      className="flex justify-between font-mono text-[11px]"
-                    >
-                      <span>{u.username}</span>
-                      <button
-                        type="button"
-                        className="text-rose-600"
-                        onClick={() =>
-                          patch({
-                            ...svc,
-                            aaa: {
-                              ...svc.aaa!,
-                              users: svc.aaa!.users.filter((_, i) => i !== idx),
-                            },
-                          })
-                        }
-                      >
-                        −
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </>
-            )}
-          </>
-        )}
+                  </li>
+                ))}
+              </ul>
+            </Section>
+          )}
+        </div>
       </div>
+
     </div>
+  );
+}
+
+function Section({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div>
+      <div className="mb-2 border-b border-[#aca899] pb-1 text-[13px] font-bold text-[#003c74]">
+        {title}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function Field({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <label className="mt-1 flex items-center justify-between gap-2">
+      <span className="min-w-[8rem]">{label}</span>
+      {children}
+    </label>
+  );
+}
+
+function NavGroup({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="mb-2">
+      <div className="px-1 text-[10px] font-bold uppercase text-[#666]">
+        {label}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function NavItem({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`block w-full truncate px-2 py-0.5 text-left ${
+        active ? "bg-[#316ac5] text-white" : "hover:bg-[#d4d0c8]"
+      }`}
+    >
+      {children}
+    </button>
   );
 }

@@ -13,7 +13,9 @@ function evaluate(state: LabState): Check[] {
   const routers = state.devices.filter((d) => isL3Device(d.type));
   const hasTrunk = sw?.interfaces.some((i) => i.mode === "trunk") ?? false;
   const dhcpOn = server?.services?.dhcp?.enabled ?? false;
-  const leases = server?.services?.dhcp?.leases.length ?? 0;
+  const leases =
+    server?.services?.dhcp?.pools?.reduce((n, p) => n + p.leases.length, 0) ??
+    0;
   const pcWithIp = pcs.filter((p) => p.interfaces.some((i) => i.ip)).length;
   const wifiLinks = state.links.filter((l) => l.media === "wireless").length;
   const serialLinks = state.links.filter((l) => l.media === "serial").length;

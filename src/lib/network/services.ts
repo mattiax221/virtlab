@@ -5,24 +5,90 @@ import type {
   Device,
   DeviceServices,
   DhcpPool,
+  DhcpService,
   DnsRecord,
   HttpService,
   LabState,
 } from "./types";
 
-/** Default servizi Server-PT (DHCP/DNS/HTTP/Email/FTP/AAA). */
+function poolEndIp(startIp: string, maxUsers: number): string {
+  const s = parseIp(startIp);
+  if (s === null) return startIp;
+  return formatIp(s + Math.max(0, maxUsers - 1));
+}
+
+/** Normalizza DHCP legacy → pools PT */
+export function normalizeDhcp(dhcp: DeviceServices["dhcp"]): DhcpService | undefined {
+  if (!dhcp) return undefined;
+  if ("pools" in dhcp && Array.isArray((dhcp as DhcpService).pools)) {
+    return dhcp as DhcpService;
+  }
+  // legacy flat pool
+  const legacy = dhcp as unknown as {
+    enabled?: boolean;
+    network?: string;
+    mask?: string;
+    gateway?: string;
+    dns?: string;
+    startIp?: string;
+    endIp?: string;
+    leases?: DhcpPool["leases"];
+  };
+  const start = legacy.startIp ?? "192.168.1.101";
+  const end = parseIp(legacy.endIp ?? "192.168.1.200");
+  const st = parseIp(start);
+  const maxUsers =
+    st !== null && end !== null ? Math.max(1, end - st + 1) : 100;
+  return {
+    enabled: legacy.enabled ?? true,
+    pools: [
+      {
+        name: "serverPool",
+        gateway: legacy.gateway ?? "192.168.1.1",
+        dns: legacy.dns ?? "192.168.1.100",
+        startIp: start,
+        mask: legacy.mask ?? "255.255.255.0",
+        maxUsers,
+        leases: legacy.leases ?? [],
+        locked: true,
+      },
+    ],
+  };
+}
+
+export function allDhcpLeases(dhcp: DeviceServices["dhcp"]) {
+  const n = normalizeDhcp(dhcp);
+  if (!n) return [];
+  return n.pools.flatMap((p) => p.leases);
+}
+
+/** Default servizi Server-PT (docs Configuring Servers). */
 export function defaultServerServices(name: string): DeviceServices {
   return {
-    domain: "lab.local",
+    displayName: name,
+    gateway: "192.168.1.1",
+    dnsServer: "192.168.1.100",
+    ipv4Mode: "static",
+    algorithm: {
+      useGlobal: true,
+      maxConnections: 100,
+      maxSessions: 50,
+      retransmitMs: 2000,
+    },
     dhcp: {
       enabled: true,
-      network: "192.168.1.0",
-      mask: "255.255.255.0",
-      gateway: "192.168.1.1",
-      dns: "192.168.1.100",
-      startIp: "192.168.1.101",
-      endIp: "192.168.1.200",
-      leases: [],
+      pools: [
+        {
+          name: "serverPool",
+          gateway: "192.168.1.1",
+          dns: "192.168.1.100",
+          startIp: "192.168.1.101",
+          mask: "255.255.255.0",
+          maxUsers: 100,
+          leases: [],
+          locked: true,
+        },
+      ],
     },
     dns: {
       enabled: true,
@@ -31,69 +97,71 @@ export function defaultServerServices(name: string): DeviceServices {
         { name: "www.lab", type: "A", ip: "192.168.1.100" },
         { name: "mail.lab", type: "A", ip: "192.168.1.100" },
         { name: "router.lab", type: "A", ip: "192.168.1.1" },
-        { name: "www", type: "CNAME", target: "server.lab" },
+        { name: "www", type: "CNAME", target: "www.lab" },
       ],
+      cache: [],
     },
     http: {
       enabled: true,
       https: true,
-      title: `${name} — NetLab Web`,
-      body: "Benvenuto sul Server-PT.\nHTTP/HTTPS attivo. Configura DNS/Email/FTP dal pannello Servizi.",
       pages: [
-        { name: "index.html", body: "<h1>Server-PT</h1><p>NetLab</p>" },
-        { name: "helloworld.html", body: "<h1>Hello World</h1>" },
-      ],
-    },
-    email: {
-      enabled: true,
-      smtp: true,
-      pop3: true,
-      domain: "lab.local",
-      users: [
-        { username: "admin", password: "cisco" },
-        { username: "user1", password: "cisco" },
-      ],
-    },
-    ftp: {
-      enabled: true,
-      accounts: [
         {
-          username: "cisco",
-          password: "cisco",
-          permissions: {
-            write: true,
-            read: true,
-            delete: true,
-            rename: true,
-            list: true,
-          },
+          name: "index.html",
+          body: "<html><body><h1>Server-PT</h1><p>NetLab HTTP</p></body></html>",
+        },
+        {
+          name: "helloworld.html",
+          body: "<html><body><h1>Hello World</h1></body></html>",
+        },
+        {
+          name: "image.html",
+          body: "<html><body><h1>Image</h1><p>(placeholder)</p></body></html>",
         },
       ],
-      files: [
-        { name: "readme.txt", size: 48 },
-        { name: "secret.txt", size: 32 },
+    },
+    tftp: {
+      enabled: true,
+      images: [
+        { name: "c1900-universalk9-mz.SPA.151-4.M4.bin", sizeKb: 72000 },
+        { name: "c2960-lanbasek9-mz.150-2.SE4.bin", sizeKb: 18000 },
       ],
     },
+    syslog: { enabled: true, entries: [] },
     aaa: {
       enabled: false,
       clients: [],
       users: [{ username: "admin", password: "cisco" }],
     },
+    ntp: {
+      enabled: true,
+      datetime: new Date().toISOString(),
+      authEnabled: false,
+      authKey: "1",
+      authPassword: "",
+    },
+    email: {
+      enabled: false,
+      smtp: true,
+      pop3: true,
+      domain: "lab.local",
+      users: [],
+    },
+    ftp: {
+      enabled: false,
+      accounts: [],
+      files: [{ name: "readme.txt", size: 48 }],
+    },
   };
 }
 
-function ipInRange(ip: string, start: string, end: string): boolean {
-  const a = parseIp(ip);
-  const s = parseIp(start);
-  const e = parseIp(end);
-  if (a === null || s === null || e === null) return false;
-  return a >= s && a <= e;
-}
-
-function nextFreeIp(pool: DhcpPool, used: Set<string>): string | null {
-  const start = parseIp(pool.startIp);
-  const end = parseIp(pool.endIp);
-  if (start === null || end === null) return null;
+function nextFreeIp(
+  startIp: string,
+  maxUsers: number,
+  used: Set<string>,
+): string | null {
+  const start = parseIp(startIp);
+  if (start === null) return null;
+  const end = start + Math.max(0, maxUsers - 1);
   for (let v = start; v <= end; v++) {
     const ip = formatIp(v);
     if (!used.has(ip)) return ip;
@@ -101,7 +169,6 @@ function nextFreeIp(pool: DhcpPool, used: Set<string>): string | null {
   return null;
 }
 
-/** Find DHCP servers reachable at L2 from client and request a lease */
 export function requestDhcp(
   state: LabState,
   clientId: string,
@@ -136,14 +203,16 @@ export function requestDhcp(
   for (const h of flood.hosts) {
     const d = getDevice(next, h.device.id);
     if (!d || seen.has(d.id)) continue;
-    if (d.services?.dhcp?.enabled) {
+    const dhcp = normalizeDhcp(d.services?.dhcp);
+    if (dhcp?.enabled) {
       servers.push(d);
       seen.add(d.id);
     }
   }
   for (const d of next.devices) {
     if (seen.has(d.id)) continue;
-    if (!d.services?.dhcp?.enabled) continue;
+    const dhcp = normalizeDhcp(d.services?.dhcp);
+    if (!dhcp?.enabled) continue;
     const back = l2Flood(next, d.id);
     next = back.state;
     if (back.hosts.some((h) => h.device.id === clientId)) {
@@ -161,13 +230,17 @@ export function requestDhcp(
   }
 
   const server = servers[0];
-  const pool = server.services!.dhcp!;
-  const used = new Set<string>();
-  for (const l of pool.leases) {
-    if (!(l.deviceId === clientId && l.ifaceId === ifaceId)) used.add(l.ip);
+  const dhcpSvc = normalizeDhcp(server.services!.dhcp)!;
+  const pool = dhcpSvc.pools[0];
+  if (!pool) {
+    return { state: next, ok: false, message: "Nessun pool DHCP." };
   }
-  for (const h of flood.hosts) {
-    if (h.iface.ip) used.add(h.iface.ip);
+
+  const used = new Set<string>();
+  for (const p of dhcpSvc.pools) {
+    for (const l of p.leases) {
+      if (!(l.deviceId === clientId && l.ifaceId === ifaceId)) used.add(l.ip);
+    }
   }
   for (const d of next.devices) {
     for (const i of d.interfaces) {
@@ -178,25 +251,11 @@ export function requestDhcp(
   let ip =
     pool.leases.find((l) => l.deviceId === clientId && l.ifaceId === ifaceId)
       ?.ip ?? null;
-  if (
-    ip &&
-    used.has(ip) &&
-    !pool.leases.some((l) => l.ip === ip && l.ifaceId === ifaceId)
-  ) {
-    ip = null;
-  }
-  if (!ip) {
-    used.delete(
-      pool.leases.find((l) => l.deviceId === clientId && l.ifaceId === ifaceId)
-        ?.ip ?? "",
-    );
-    ip = nextFreeIp(pool, used);
+  if (!ip || used.has(ip)) {
+    ip = nextFreeIp(pool.startIp, pool.maxUsers, used);
   }
   if (!ip) {
     return { state: next, ok: false, message: "Pool DHCP esaurito." };
-  }
-  if (!ipInRange(ip, pool.startIp, pool.endIp) && !pool.leases.some((l) => l.ip === ip)) {
-    ip = nextFreeIp(pool, used) ?? ip;
   }
 
   const leases = pool.leases.filter(
@@ -208,6 +267,9 @@ export function requestDhcp(
     deviceId: clientId,
     ifaceId,
   });
+  const pools = dhcpSvc.pools.map((p, i) =>
+    i === 0 ? { ...p, leases } : p,
+  );
 
   next = {
     ...next,
@@ -217,7 +279,7 @@ export function requestDhcp(
           ...d,
           services: {
             ...d.services,
-            dhcp: { ...pool, leases },
+            dhcp: { enabled: true, pools },
           },
         };
       }
@@ -245,11 +307,10 @@ export function requestDhcp(
   return {
     state: next,
     ok: true,
-    message: `DHCP OK: ${ip} mask ${pool.mask} gw ${pool.gateway || "—"} dns ${pool.dns || "—"} (da ${server.name})`,
+    message: `DHCP OK: ${ip} mask ${pool.mask} gw ${pool.gateway || "—"} dns ${pool.dns || "—"} (pool ${pool.name} @ ${server.name})`,
   };
 }
 
-/** Rilascia IP sul client e rimuove il lease dai server DHCP della LAN. */
 export function releaseDhcp(
   state: LabState,
   clientId: string,
@@ -293,17 +354,22 @@ export function releaseDhcp(
   next = {
     ...next,
     devices: next.devices.map((d) => {
-      const dhcp = d.services?.dhcp;
-      if (!dhcp?.leases?.length) return d;
-      const leases = dhcp.leases.filter(
-        (l) => !(l.deviceId === clientId && l.ifaceId === iface.id),
-      );
-      if (leases.length === dhcp.leases.length) return d;
+      const dhcp = normalizeDhcp(d.services?.dhcp);
+      if (!dhcp) return d;
+      let changed = false;
+      const pools = dhcp.pools.map((p) => {
+        const leases = p.leases.filter(
+          (l) => !(l.deviceId === clientId && l.ifaceId === iface.id),
+        );
+        if (leases.length !== p.leases.length) changed = true;
+        return { ...p, leases };
+      });
+      if (!changed) return d;
       return {
         ...d,
         services: {
           ...d.services,
-          dhcp: { ...dhcp, leases },
+          dhcp: { enabled: dhcp.enabled, pools },
         },
       };
     }),
@@ -363,8 +429,6 @@ export function resolveDnsName(
     const ip = lookupDnsOnServer(d.services!.dns!.records, q);
     if (ip) return ip;
   }
-
-  // Fallback: qualsiasi DNS abilitato nel lab
   for (const d of state.devices) {
     if (!d.services?.dns?.enabled) continue;
     const ip = lookupDnsOnServer(d.services.dns.records, q);
@@ -387,42 +451,29 @@ export function updateDeviceServices(
         services: {
           ...d.services,
           ...patch,
-          dhcp: patch.dhcp
-            ? { ...(d.services?.dhcp as DhcpPool), ...patch.dhcp }
-            : d.services?.dhcp,
-          dns: patch.dns
-            ? {
-                enabled: patch.dns.enabled ?? d.services?.dns?.enabled ?? true,
-                records: patch.dns.records ?? d.services?.dns?.records ?? [],
-              }
-            : d.services?.dns,
-          http: patch.http
-            ? { ...(d.services?.http as HttpService), ...patch.http }
-            : d.services?.http,
-          email: patch.email ?? d.services?.email,
-          ftp: patch.ftp ?? d.services?.ftp,
-          aaa: patch.aaa ?? d.services?.aaa,
-          domain: patch.domain ?? d.services?.domain,
         },
       };
     }),
   };
 }
 
-/**
- * HTTP GET simulato. Passa `reachable: true` solo dopo un ping/rotta ok.
- */
 export function fetchHttp(
   state: LabState,
   clientId: string,
   target: string,
-  opts?: { reachable?: boolean },
+  opts?: { reachable?: boolean; path?: string },
 ): { ok: boolean; output: string; destIp?: string } {
   let ip = target;
-  if (!/^\d+\.\d+\.\d+\.\d+$/.test(target)) {
-    const resolved = resolveDnsName(state, clientId, target);
+  let path = opts?.path ?? "index.html";
+  if (target.includes("/") && !/^\d+\.\d+\.\d+\.\d+$/.test(target)) {
+    // host/path
+  }
+  if (!/^\d+\.\d+\.\d+\.\d+$/.test(ip.split("/")[0]!)) {
+    const host = ip.split("/")[0]!;
+    if (ip.includes("/")) path = ip.slice(host.length + 1) || "index.html";
+    const resolved = resolveDnsName(state, clientId, host);
     if (!resolved) {
-      return { ok: false, output: `Impossibile risolvere: ${target}` };
+      return { ok: false, output: `Impossibile risolvere: ${host}` };
     }
     ip = resolved;
   }
@@ -451,19 +502,22 @@ export function fetchHttp(
     return { ok: false, output: `Host ${ip} spento.`, destIp: ip };
   }
   const http = server.services!.http!;
+  const page =
+    http.pages.find((p) => p.name === path || p.name === path.replace(/^\//, "")) ??
+    http.pages.find((p) => p.name === "index.html") ??
+    http.pages[0];
   return {
     ok: true,
     destIp: ip,
     output: [
       `HTTP/1.1 200 OK`,
       `Server: ${server.name}`,
-      `Content-Type: text/plain`,
+      `Content-Type: text/html`,
       ``,
-      http.title,
-      ``,
-      http.body,
+      page?.body ?? "<h1>Empty</h1>",
     ].join("\n"),
   };
 }
 
-export type { DnsRecord };
+export { poolEndIp };
+export type { DnsRecord, HttpService };

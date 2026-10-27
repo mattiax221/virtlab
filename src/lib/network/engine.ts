@@ -303,8 +303,8 @@ export function createDemoLab(): LabState {
   server.interfaces[0].ip = "192.168.1.100";
   server.interfaces[0].mask = "255.255.255.0";
   server.interfaces[0].gateway = "192.168.1.1";
-  if (server.services?.dhcp) {
-    server.services.dhcp.dns = "192.168.1.100";
+  if (server.services?.dhcp?.pools?.[0]) {
+    server.services.dhcp.pools[0].dns = "192.168.1.100";
   }
   rtr.interfaces[0].ip = "192.168.1.1";
   rtr.interfaces[0].mask = "255.255.255.0";

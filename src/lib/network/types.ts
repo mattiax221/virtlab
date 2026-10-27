@@ -216,36 +216,37 @@ export type DhcpLease = {
   ifaceId: string;
 };
 
+/** Pool DHCP stile PT (Pool Name, Gateway, DNS, Start IP, Mask, Max Users) */
 export type DhcpPool = {
-  enabled: boolean;
-  network: string;
-  mask: string;
+  name: string;
   gateway: string;
   dns: string;
   startIp: string;
-  endIp: string;
+  mask: string;
+  maxUsers: number;
   leases: DhcpLease[];
+  /** serverPool non rimovibile */
+  locked?: boolean;
+};
+
+export type DhcpService = {
+  enabled: boolean;
+  pools: DhcpPool[];
 };
 
 export type DnsRecordType = "A" | "CNAME" | "NS" | "SOA";
 
 export type DnsRecord = {
   name: string;
-  /** Default A se assente (lab vecchi) */
   type?: DnsRecordType;
-  /** Indirizzo per record A */
   ip?: string;
-  /** Target per CNAME / NS / SOA primary */
   target?: string;
 };
 
 export type HttpService = {
   enabled: boolean;
   https?: boolean;
-  title: string;
-  body: string;
-  /** Pagine aggiuntive nome → HTML/testo */
-  pages?: { name: string; body: string }[];
+  pages: { name: string; body: string }[];
 };
 
 export type ServerUser = { username: string; password: string };
@@ -287,16 +288,54 @@ export type AaaService = {
   users: ServerUser[];
 };
 
-/** Servizi Server-PT (docs PT Configuring Servers) */
+export type TftpService = {
+  enabled: boolean;
+  images: { name: string; sizeKb: number }[];
+};
+
+export type SyslogEntry = {
+  time: string;
+  hostname: string;
+  message: string;
+};
+
+export type SyslogService = {
+  enabled: boolean;
+  entries: SyslogEntry[];
+};
+
+export type NtpService = {
+  enabled: boolean;
+  /** ISO date/time o sync host */
+  datetime: string;
+  authEnabled: boolean;
+  authKey: string;
+  authPassword: string;
+};
+
+export type ServerAlgorithm = {
+  useGlobal: boolean;
+  maxConnections: number;
+  maxSessions: number;
+  retransmitMs: number;
+};
+
+/** Servizi Server-PT — https://tutorials.ptnetacad.net/help/default/config_servers.htm */
 export type DeviceServices = {
-  /** Dominio globale (email / zona DNS) es. lab.local */
-  domain?: string;
-  dhcp?: DhcpPool;
-  dns?: { enabled: boolean; records: DnsRecord[] };
+  displayName?: string;
+  gateway?: string;
+  dnsServer?: string;
+  ipv4Mode?: "static" | "dhcp";
+  algorithm?: ServerAlgorithm;
+  dhcp?: DhcpService;
+  dns?: { enabled: boolean; records: DnsRecord[]; cache?: { name: string; ip: string }[] };
   http?: HttpService;
   email?: EmailService;
   ftp?: FtpService;
   aaa?: AaaService;
+  tftp?: TftpService;
+  syslog?: SyslogService;
+  ntp?: NtpService;
 };
 
 export type Link = {

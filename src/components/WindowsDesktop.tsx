@@ -29,7 +29,11 @@ export function WindowsDesktop({
     stateRef.current.devices.find((d) => d.id === device.id) ?? device;
   const eth = live.interfaces.find((i) => !i.parentIfaceId);
   const [clock, setClock] = useState("--:--");
-  const [app, setApp] = useState<AppWindow>("network");
+  const [app, setApp] = useState<AppWindow>(() =>
+    device.type === "server" || device.type === "meraki_server"
+      ? "services"
+      : "network",
+  );
 
   useEffect(() => {
     const tick = () =>
@@ -108,7 +112,7 @@ export function WindowsDesktop({
             />
             {(live.type === "server" || live.type === "meraki_server") && (
               <DesktopIcon
-                label="Servizi"
+                label="Config / Services"
                 kind="svc"
                 active={app === "services"}
                 onClick={() => setApp("services")}
