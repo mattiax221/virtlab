@@ -14,14 +14,17 @@ Laboratorio di rete nel browser: topologia stile Packet Tracer, ma quando apri u
 
 Non è una VM Windows reale (QEMU/Hyper-V + licenza Microsoft). La rete e i comandi sono simulati in modo coerente a scopo didattico. Un passo successivo può collegare console/noVNC a macchine virtuali vere.
 
-## Avvio locale
+## Avvio locale (sul tuo PC)
+
+Il link `127.0.0.1` funziona **solo sulla macchina dove gira** `npm run dev`.
+Se apri Chrome sul PC mentre il server è solo sulla VM Cloud Agent, ottieni `ERR_CONNECTION_REFUSED`.
 
 ```bash
 npm install
 npm run dev
 ```
 
-Apri [http://127.0.0.1:43127](http://127.0.0.1:43127).
+Poi apri [http://127.0.0.1:43127](http://127.0.0.1:43127) **su quel stesso PC**.
 
 ## Percorso consigliato
 
