@@ -616,6 +616,15 @@ export function LabWorkspace() {
             })}
           </svg>
 
+          {state.devices.length === 0 && (
+            <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+              <p className="max-w-sm text-center text-sm text-slate-500">
+                Canvas vuoto — scegli un dispositivo dalla barra sotto
+                (stile Packet Tracer).
+              </p>
+            </div>
+          )}
+
           {state.devices.map((device) => (
             <button
               key={device.id}
