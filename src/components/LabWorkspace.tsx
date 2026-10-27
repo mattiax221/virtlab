@@ -38,6 +38,13 @@ export function LabWorkspace() {
   } | null>(null);
   const [showLanding, setShowLanding] = useState(true);
 
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("lab") === "1" || window.location.hash === "#lab") {
+      setShowLanding(false);
+    }
+  }, []);
+
   const canvasRef = useRef<HTMLDivElement>(null);
 
   const showToast = useCallback((msg: string) => {
