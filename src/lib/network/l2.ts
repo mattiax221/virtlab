@@ -2,6 +2,7 @@ import {
   getDevice,
   getIface,
 } from "./engine-helpers";
+import { isLinkPhysicallyUp } from "./linkStatus";
 import {
   isL2Bridge,
   isManagedSwitch,
@@ -41,6 +42,8 @@ export function linkNeighbors(
     if (!iface.connectedLinkId || !iface.enabled) continue;
     const link = state.links.find((l) => l.id === iface.connectedLinkId);
     if (!link || link.media === "console") continue;
+    // Link rosso (cavo sbagliato / spento / no clock) non trasporta frame
+    if (!isLinkPhysicallyUp(state, link)) continue;
     const end = otherEnd(state, link, deviceId);
     if (end && end.iface.enabled) result.push({ iface, end, link });
   }

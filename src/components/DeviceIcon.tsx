@@ -15,38 +15,46 @@ export function DeviceIcon({
     case "pc":
       return (
         <svg viewBox="0 0 64 64" className={common} aria-hidden>
-          <rect x="10" y="8" width="44" height="32" rx="2" fill="#64748b" />
-          <rect x="14" y="12" width="36" height="24" fill="#94a3b8" />
-          <rect x="26" y="40" width="12" height="4" fill="#475569" />
-          <rect x="18" y="44" width="28" height="6" rx="1" fill="#cbd5e1" />
+          {/* Desktop monitor + base — ben distinto dal server tower */}
+          <rect x="8" y="6" width="48" height="36" rx="3" fill="#334155" />
+          <rect x="12" y="10" width="40" height="28" rx="1" fill="#7dd3fc" />
+          <rect x="14" y="12" width="36" height="24" fill="#0f172a" />
+          <rect x="28" y="42" width="8" height="5" fill="#475569" />
+          <rect x="16" y="47" width="32" height="7" rx="1" fill="#94a3b8" />
+          <rect x="22" y="49" width="8" height="2" rx="0.5" fill="#64748b" />
         </svg>
       );
     case "laptop":
       return (
         <svg viewBox="0 0 64 64" className={common} aria-hidden>
-          <rect x="12" y="14" width="40" height="26" rx="2" fill="#64748b" />
-          <rect x="16" y="18" width="32" height="18" fill="#94a3b8" />
-          <path d="M8 44h48l-4-4H12z" fill="#cbd5e1" />
+          <rect x="12" y="12" width="40" height="26" rx="2" fill="#334155" />
+          <rect x="16" y="16" width="32" height="18" fill="#0f172a" />
+          <path d="M6 42h52l-5-4H11z" fill="#94a3b8" />
+          <rect x="26" y="44" width="12" height="2" rx="1" fill="#64748b" />
         </svg>
       );
     case "server":
       return (
         <svg viewBox="0 0 64 64" className={common} aria-hidden>
-          <rect x="18" y="6" width="28" height="52" rx="2" fill="#38bdf8" />
-          <rect x="22" y="12" width="20" height="6" rx="1" fill="#0c4a6e" opacity="0.35" />
-          <rect x="22" y="22" width="20" height="6" rx="1" fill="#0c4a6e" opacity="0.35" />
-          <rect x="22" y="32" width="20" height="6" rx="1" fill="#0c4a6e" opacity="0.35" />
-          <circle cx="26" cy="15" r="1.5" fill="#4ade80" />
+          {/* Tower rack 2U-style — non confondibile col PC */}
+          <rect x="16" y="4" width="32" height="56" rx="3" fill="#1e293b" stroke="#64748b" strokeWidth="1.5" />
+          <rect x="20" y="10" width="24" height="10" rx="1" fill="#0f172a" />
+          <rect x="20" y="24" width="24" height="10" rx="1" fill="#0f172a" />
+          <rect x="20" y="38" width="24" height="10" rx="1" fill="#0f172a" />
+          <circle cx="24" cy="15" r="1.8" fill="#4ade80" />
+          <circle cx="24" cy="29" r="1.8" fill="#4ade80" />
+          <circle cx="24" cy="43" r="1.8" fill="#fbbf24" />
+          <rect x="30" y="13" width="10" height="2" rx="0.5" fill="#475569" />
+          <rect x="30" y="27" width="10" height="2" rx="0.5" fill="#475569" />
+          <rect x="30" y="41" width="10" height="2" rx="0.5" fill="#475569" />
+          <text x="32" y="56" textAnchor="middle" fontSize="7" fill="#94a3b8" fontFamily="sans-serif">
+            SRV
+          </text>
           {type === "meraki_server" && (
-            <circle cx="40" cy="48" r="6" fill="#22c55e" />
-          )}
-          {type === "meraki_server" && (
-            <text x="40" y="51" textAnchor="middle" fontSize="8" fill="#fff" fontWeight="bold">
-              M
-            </text>
+            <circle cx="44" cy="52" r="5" fill="#22c55e" />
           )}
           {type === "cyber_observer" && (
-            <circle cx="32" cy="48" r="7" fill="#0f172a" stroke="#4ade80" strokeWidth="2" />
+            <circle cx="32" cy="52" r="5" fill="#0f172a" stroke="#4ade80" strokeWidth="1.5" />
           )}
         </svg>
       );

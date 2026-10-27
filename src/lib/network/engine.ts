@@ -4,6 +4,7 @@ import { inferCable, type CableKind } from "./catalog";
 import { getDevice, getIface } from "./engine-helpers";
 import { formatIp, isValidIp, parseIp, parseMask, sameSubnet } from "./ip";
 import { l2Flood } from "./l2";
+import { cableChoiceError } from "./linkStatus";
 import { requestDhcp } from "./services";
 import {
   availableModulesFor,
@@ -490,6 +491,16 @@ export function connectDevices(
 
   const compat = ifaceLinkCompatible(aIf, bIf, media);
   if (compat) return { state, error: compat };
+
+  // Controlli stile Packet Tracer: cavo sbagliato → rifiuta (niente LED verde)
+  const choice = cableChoiceError(
+    a,
+    b,
+    media as Exclude<CableKind, "auto">,
+    aIf,
+    bIf,
+  );
+  if (choice) return { state, error: choice };
 
   const link: Link = {
     id: uid("link"),

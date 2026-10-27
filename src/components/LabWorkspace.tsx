@@ -979,6 +979,19 @@ export function LabWorkspace() {
                   : status.health === "down"
                     ? "5 5"
                     : meta.dash;
+              // Triangoli link-light stile Packet Tracer vicino a ogni estremità
+              const dx = b.x - a.x;
+              const dy = b.y - a.y;
+              const len = Math.hypot(dx, dy) || 1;
+              const ux = dx / len;
+              const uy = dy / len;
+              const tA = { x: a.x + ux * 28, y: a.y + uy * 28 };
+              const tB = { x: b.x - ux * 28, y: b.y - uy * 28 };
+              const tri = (cx: number, cy: number, towardX: number, towardY: number) => {
+                const px = -towardY;
+                const py = towardX;
+                return `${cx + towardX * 7},${cy + towardY * 7} ${cx - px * 5},${cy - py * 5} ${cx + px * 5},${cy + py * 5}`;
+              };
               return (
                 <g key={link.id} style={{ pointerEvents: "stroke" }}>
                   <line
@@ -991,14 +1004,17 @@ export function LabWorkspace() {
                     strokeOpacity={status.health === "down" ? 0.85 : 0.95}
                     strokeDasharray={dash}
                   />
-                  {/* LED al centro del cavo */}
-                  <circle
-                    cx={(a.x + b.x) / 2}
-                    cy={(a.y + b.y) / 2}
-                    r={4}
+                  <polygon
+                    points={tri(tA.x, tA.y, ux, uy)}
                     fill={status.color}
                     stroke="#020617"
-                    strokeWidth="1"
+                    strokeWidth="0.8"
+                  />
+                  <polygon
+                    points={tri(tB.x, tB.y, -ux, -uy)}
+                    fill={status.color}
+                    stroke="#020617"
+                    strokeWidth="0.8"
                   />
                   <line
                     x1={a.x}
