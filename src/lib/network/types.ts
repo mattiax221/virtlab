@@ -72,6 +72,33 @@ export type InterfaceConfig = {
   parentIfaceId: string | null;
   /** encapsulation dot1Q VLAN (subinterface) */
   vlanTag: number | null;
+  /** Obtained address via DHCP */
+  dhcpClient: boolean;
+  /** Preferred DNS (from DHCP or static) */
+  dnsServers: string[];
+  /** Serial WAN: clock rate (bps) — DCE side must set it */
+  clockRate: number | null;
+  /** Named ACL applied inbound / outbound (standard numbered ACL) */
+  aclIn: number | null;
+  aclOut: number | null;
+};
+
+export type AclAction = "permit" | "deny";
+export type AclProtocol = "ip" | "icmp" | "any";
+
+/** Cisco-like numbered ACL entry (standard/extended simplified) */
+export type AclAce = {
+  sequence: number;
+  action: AclAction;
+  protocol: AclProtocol;
+  /** "any" or host IP */
+  source: string;
+  destination: string;
+};
+
+export type AccessList = {
+  id: number;
+  aces: AclAce[];
 };
 
 export type VlanRecord = {
@@ -124,6 +151,42 @@ export type Device = {
   powered: boolean;
   /** Wi‑Fi radio (AP / WRT / home router) */
   wifi?: WifiRadio;
+  /** Server / router services (DHCP, DNS, HTTP…) */
+  services?: DeviceServices;
+  /** Numbered ACLs on routers / firewalls */
+  accessLists?: AccessList[];
+};
+
+export type DhcpLease = {
+  mac: string;
+  ip: string;
+  deviceId: string;
+  ifaceId: string;
+};
+
+export type DhcpPool = {
+  enabled: boolean;
+  network: string;
+  mask: string;
+  gateway: string;
+  dns: string;
+  startIp: string;
+  endIp: string;
+  leases: DhcpLease[];
+};
+
+export type DnsRecord = { name: string; ip: string };
+
+export type HttpService = {
+  enabled: boolean;
+  title: string;
+  body: string;
+};
+
+export type DeviceServices = {
+  dhcp?: DhcpPool;
+  dns?: { enabled: boolean; records: DnsRecord[] };
+  http?: HttpService;
 };
 
 export type Link = {

@@ -1,3 +1,4 @@
+import { routerAllowsIcmp } from "./acl";
 import { inferCable, type CableKind } from "./catalog";
 import { getDevice, getIface } from "./engine-helpers";
 import { formatIp, isValidIp, parseIp, parseMask, sameSubnet } from "./ip";
@@ -11,6 +12,7 @@ import {
   slotCountFor,
   type ModuleKind,
 } from "./modules";
+import { resolveDnsName } from "./services";
 import {
   DEVICE_META,
   defaultVlans,
@@ -74,6 +76,36 @@ export function createDevice(
       enabled: true,
       band: "2.4",
     };
+  }
+  if (type === "server") {
+    device.services = {
+      dhcp: {
+        enabled: true,
+        network: "192.168.1.0",
+        mask: "255.255.255.0",
+        gateway: "192.168.1.1",
+        dns: "192.168.1.100",
+        startIp: "192.168.1.101",
+        endIp: "192.168.1.200",
+        leases: [],
+      },
+      dns: {
+        enabled: true,
+        records: [
+          { name: "server.lab", ip: "192.168.1.100" },
+          { name: "www.lab", ip: "192.168.1.100" },
+          { name: "router.lab", ip: "192.168.1.1" },
+        ],
+      },
+      http: {
+        enabled: true,
+        title: `${name} — NetLab Web`,
+        body: "Benvenuto sul Server-PT.\nHTTP attivo. Prova: curl/http da un PC.",
+      },
+    };
+  }
+  if (isL3Device(type) || type.startsWith("firewall")) {
+    device.accessLists = [];
   }
   return device;
 }
@@ -244,6 +276,11 @@ export function createSubinterface(
     moduleId: parent.moduleId,
     parentIfaceId: parent.id,
     vlanTag,
+    dhcpClient: false,
+    dnsServers: [],
+    clockRate: null,
+    aclIn: null,
+    aclOut: null,
   };
   return {
     state: {
@@ -263,23 +300,29 @@ export function createEmptyLab(): LabState {
 }
 
 export function createDemoLab(): LabState {
-  const pc1 = createDevice("pc", "PC0", 120, 200);
-  const pc2 = createDevice("pc", "PC1", 520, 200);
-  const printer = createDevice("printer", "Printer0", 320, 80);
-  const sw = createDevice("switch_2960", "Switch0", 320, 200);
-  const rtr = createDevice("router_2911", "Router0", 320, 380);
-  const modem = createDevice("modem_cable", "CableModem0", 520, 380);
-  const cloud = createDevice("cloud", "Internet", 700, 380);
+  const pc1 = createDevice("pc", "PC0", 100, 200);
+  const pc2 = createDevice("pc", "PC1", 280, 80);
+  const server = createDevice("server", "Server0", 480, 80);
+  const printer = createDevice("printer", "Printer0", 100, 80);
+  const sw = createDevice("switch_2960", "Switch0", 300, 220);
+  const rtr = createDevice("router_2911", "Router0", 300, 380);
+  const modem = createDevice("modem_cable", "CableModem0", 500, 380);
+  const cloud = createDevice("cloud", "Internet", 680, 380);
 
+  // Ethernet is interfaces[0]; leave PC1 on DHCP for demo of auto-IP
   pc1.interfaces[0].ip = "192.168.1.10";
   pc1.interfaces[0].mask = "255.255.255.0";
   pc1.interfaces[0].gateway = "192.168.1.1";
-  pc2.interfaces[0].ip = "192.168.1.20";
-  pc2.interfaces[0].mask = "255.255.255.0";
-  pc2.interfaces[0].gateway = "192.168.1.1";
+  pc1.interfaces[0].dnsServers = ["192.168.1.100"];
   printer.interfaces[0].ip = "192.168.1.50";
   printer.interfaces[0].mask = "255.255.255.0";
   printer.interfaces[0].gateway = "192.168.1.1";
+  server.interfaces[0].ip = "192.168.1.100";
+  server.interfaces[0].mask = "255.255.255.0";
+  server.interfaces[0].gateway = "192.168.1.1";
+  if (server.services?.dhcp) {
+    server.services.dhcp.dns = "192.168.1.100";
+  }
   rtr.interfaces[0].ip = "192.168.1.1";
   rtr.interfaces[0].mask = "255.255.255.0";
   rtr.interfaces[1].ip = "10.0.0.2";
@@ -290,8 +333,9 @@ export function createDemoLab(): LabState {
   const linksSpec: [Device, number, Device, number][] = [
     [pc1, 0, sw, 0],
     [pc2, 0, sw, 1],
-    [printer, 0, sw, 2],
-    [rtr, 0, sw, 3],
+    [server, 0, sw, 2],
+    [printer, 0, sw, 3],
+    [rtr, 0, sw, 4],
     [rtr, 1, modem, 0],
     [modem, 1, cloud, 0],
   ];
@@ -313,7 +357,7 @@ export function createDemoLab(): LabState {
   }
 
   return {
-    devices: [pc1, pc2, printer, sw, rtr, modem, cloud],
+    devices: [pc1, pc2, server, printer, sw, rtr, modem, cloud],
     links,
   };
 }
@@ -384,6 +428,13 @@ export function connectDevices(
       bIf = bw;
       media = "wireless";
     }
+  }
+  if (cable === "serial" || media === "serial") {
+    const as = aFree.find((i) => i.media === "serial");
+    const bs = bFree.find((i) => i.media === "serial");
+    if (as) aIf = as;
+    if (bs) bIf = bs;
+    if (as || bs) media = "serial";
   }
 
   const compat = ifaceLinkCompatible(aIf, bIf, media);
@@ -468,6 +519,11 @@ export function updateIface(
       | "nativeVlan"
       | "allowedVlans"
       | "vlanTag"
+      | "dhcpClient"
+      | "dnsServers"
+      | "clockRate"
+      | "aclIn"
+      | "aclOut"
     >
   >,
 ): LabState {
@@ -488,7 +544,9 @@ export function updateIface(
 export function updateDevice(
   state: LabState,
   deviceId: string,
-  patch: Partial<Pick<Device, "name" | "vlans" | "macTable">>,
+  patch: Partial<
+    Pick<Device, "name" | "vlans" | "macTable" | "accessLists" | "services">
+  >,
 ): LabState {
   return {
     ...state,
@@ -551,6 +609,22 @@ function collectRouterDomains(
     } else if (iface.connectedLinkId) {
       const link = next.links.find((l) => l.id === iface.connectedLinkId);
       if (!link || link.media === "console") continue;
+      // Serial WAN requires clock rate on at least one side (DCE)
+      if (link.media === "serial" || iface.media === "serial") {
+        const peer =
+          link.aDeviceId === router.id
+            ? getDevice(next, link.bDeviceId)
+            : getDevice(next, link.aDeviceId);
+        const peerIf = peer?.interfaces.find(
+          (i) =>
+            i.id ===
+            (link.aDeviceId === router.id ? link.bIfaceId : link.aIfaceId),
+        );
+        const hasClock =
+          (iface.clockRate != null && iface.clockRate > 0) ||
+          (peerIf?.clockRate != null && peerIf.clockRate > 0);
+        if (!hasClock) continue; // line protocol down
+      }
       peerDeviceId =
         link.aDeviceId === router.id ? link.bDeviceId : link.aDeviceId;
     } else {
@@ -599,11 +673,22 @@ export function runPing(
     };
   }
 
+  // DNS name → IP
   if (!isValidIp(targetIp)) {
-    return {
-      state,
-      result: failPing("", targetIp, count, [], `Indirizzo non valido: ${targetIp}`),
-    };
+    const resolved = resolveDnsName(state, fromDeviceId, targetIp);
+    if (!resolved) {
+      return {
+        state,
+        result: failPing(
+          "",
+          targetIp,
+          count,
+          [],
+          `Impossibile risolvere nome host: ${targetIp}`,
+        ),
+      };
+    }
+    targetIp = resolved;
   }
 
   const srcIface =
@@ -652,6 +737,33 @@ export function runPing(
         state: nextState,
         result: failPing(fromIp, targetIp, count, hops, "Cavo non collegato."),
       };
+    }
+    // Serial same-subnet: need clock on DCE
+    if (srcIface.media === "serial") {
+      const link = nextState.links.find((l) => l.id === srcIface.connectedLinkId);
+      if (link) {
+        const peerId =
+          link.aDeviceId === from.id ? link.bDeviceId : link.aDeviceId;
+        const peerIfId =
+          link.aDeviceId === from.id ? link.bIfaceId : link.aIfaceId;
+        const peer = getDevice(nextState, peerId);
+        const peerIf = peer?.interfaces.find((i) => i.id === peerIfId);
+        const hasClock =
+          (srcIface.clockRate != null && srcIface.clockRate > 0) ||
+          (peerIf?.clockRate != null && peerIf.clockRate > 0);
+        if (!hasClock) {
+          return {
+            state: nextState,
+            result: failPing(
+              fromIp,
+              targetIp,
+              count,
+              hops,
+              "Serial: line protocol down (manca clock rate sul DCE).",
+            ),
+          };
+        }
+      }
     }
     const target = flood.hosts.find((e) => e.iface.ip === targetIp);
     if (!target) {
@@ -719,6 +831,11 @@ export function runPing(
   });
 
   if (isL3Device(gw.device.type)) {
+    const ingress =
+      gw.iface ??
+      findLocalRoute(gw.device, fromIp) ??
+      gw.device.interfaces.find((i) => i.ip === srcIface.gateway) ??
+      null;
     void findLocalRoute;
     const routed = collectRouterDomains(nextState, gw.device);
     nextState = routed.state;
@@ -727,6 +844,35 @@ export function runPing(
       return {
         state: nextState,
         result: failPing(fromIp, targetIp, count, hops, "Nessuna rotta."),
+      };
+    }
+    const egress =
+      findLocalRoute(gw.device, targetIp) ??
+      gw.device.interfaces.find(
+        (i) =>
+          i.ip &&
+          i.mask &&
+          found.iface.ip &&
+          sameSubnet(i.ip, found.iface.ip, i.mask),
+      ) ??
+      null;
+    const acl = routerAllowsIcmp(
+      gw.device,
+      ingress,
+      egress,
+      fromIp,
+      targetIp,
+    );
+    if (!acl.ok) {
+      return {
+        state: nextState,
+        result: failPing(
+          fromIp,
+          targetIp,
+          count,
+          hops,
+          acl.reason ?? "Negato da ACL.",
+        ),
       };
     }
     hops.push({

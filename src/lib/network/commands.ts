@@ -13,6 +13,7 @@ import {
   formatVlanBrief,
   l2Flood,
 } from "./l2";
+import { fetchHttp, requestDhcp } from "./services";
 import type { CommandResult, LabState, VlanRecord } from "./types";
 
 export type CommandContext = {
@@ -27,17 +28,20 @@ function helpPc(): string {
     "  ipconfig                 Mostra la configurazione IP",
     "  ipconfig /all            Dettagli completi (MAC, gateway)",
     "  ipconfig /ip <ip> <mask> [gateway]",
-    "                           Imposta IP statico sull'interfaccia Ethernet0",
-    "  ping <indirizzo>         Invia echo ICMP all'host",
-    "  arp -a                   Mostra cache ARP (host visti in LAN)",
-    "  route print              Mostra tabella di routing",
+    "                           Imposta IP statico",
+    "  ipconfig /renew          Richiede IP via DHCP",
+    "  ping <indirizzo|nome>    ICMP (anche nomi DNS tipo server.lab)",
+    "  http <host>              GET HTTP su Server-PT",
+    "  arp -a                   Cache ARP",
+    "  route print              Tabella di routing",
     "  hostname                 Nome del PC",
     "  cls / clear              Pulisce lo schermo",
     "  help                     Questo aiuto",
     "",
     "Esempio:",
-    "  ipconfig /ip 192.168.1.10 255.255.255.0 192.168.1.1",
-    "  ping 192.168.1.20",
+    "  ipconfig /renew",
+    "  ping server.lab",
+    "  http www.lab",
   ].join("\n");
 }
 
@@ -52,7 +56,11 @@ function helpRouter(): string {
     "  interface <nome>.<vlan>       subinterface (router-on-a-stick)",
     "  encapsulation dot1Q <vlan>",
     "  ip address <ip> <mask>",
+    "  clock rate <bps>              Serial DCE (es. 64000)",
     "  no shutdown",
+    "  access-list <n> permit|deny ip|icmp <src> <dst>",
+    "  ip access-group <n> in|out",
+    "  show access-lists",
     "  exit",
     "  ping <indirizzo>",
     "  hostname <nome>",
@@ -65,6 +73,9 @@ function helpRouter(): string {
     "  ip address 192.168.10.1 255.255.255.0",
     "  no shutdown",
     "  (ripeti per .20) — sullo switch: porta verso router in trunk",
+    "",
+    "WAN seriale: Physical → Serial WIC → cavo Serial → clock rate sul DCE",
+    "ACL: access-list 100 deny icmp any host 192.168.1.100",
   ].join("\n");
 }
 
@@ -225,12 +236,40 @@ export function runPcCommand(
     return { output: setIp(ctx, ip, mask, gw) };
   }
 
+  if (lower === "ipconfig /renew" || lower === "ipconfig /release") {
+    const device = getDevice(ctx.state, ctx.deviceId);
+    const iface = device?.interfaces.find((i) => !i.parentIfaceId);
+    if (!iface) return { output: "Nessuna interfaccia." };
+    if (lower.endsWith("/release")) {
+      ctx.setState(
+        updateIface(ctx.state, ctx.deviceId, iface.id, {
+          ip: null,
+          mask: null,
+          gateway: null,
+          dhcpClient: true,
+          dnsServers: [],
+        }),
+      );
+      return { output: "Indirizzo IP rilasciato." };
+    }
+    const res = requestDhcp(ctx.state, ctx.deviceId, iface.id);
+    ctx.setState(res.state);
+    return { output: res.message };
+  }
+
   if (lower.startsWith("ping ")) {
     const target = parts[1];
-    if (!target) return { output: "Uso: ping <indirizzo>" };
+    if (!target) return { output: "Uso: ping <indirizzo|nome>" };
     const { result, state } = runPing(ctx.state, ctx.deviceId, target);
     ctx.setState(state);
     return { output: result.message };
+  }
+
+  if (lower.startsWith("http ") || lower.startsWith("curl ")) {
+    const target = parts[1];
+    if (!target) return { output: "Uso: http <host|ip>" };
+    const res = fetchHttp(ctx.state, ctx.deviceId, target.replace(/^https?:\/\//, ""));
+    return { output: res.output };
   }
 
   if (lower === "arp -a" || lower === "arp") {
@@ -612,6 +651,128 @@ export function runRouterCommand(
   }
 
   if (
+    lower.startsWith("clock rate ") &&
+    cli.mode === "config-if" &&
+    cli.ifaceId
+  ) {
+    const rate = Number(parts[2]);
+    if (!Number.isFinite(rate) || rate <= 0) {
+      return { output: "% Incomplete command. Uso: clock rate 64000" };
+    }
+    const iface = device.interfaces.find((i) => i.id === cli.ifaceId);
+    if (iface && iface.media !== "serial") {
+      return { output: "% clock rate solo su interfacce Serial" };
+    }
+    ctx.setState(
+      updateIface(ctx.state, ctx.deviceId, cli.ifaceId, { clockRate: rate }),
+    );
+    return { output: "" };
+  }
+
+  if (lower.startsWith("access-list ") && cli.mode === "config") {
+    // access-list <n> permit|deny ip|icmp <src> <dst>
+    const id = Number(parts[1]);
+    const action = parts[2]?.toLowerCase();
+    const protocol = (parts[3]?.toLowerCase() ?? "ip") as "ip" | "icmp" | "any";
+    let src = parts[4];
+    let dst = parts[5];
+    if (src?.toLowerCase() === "host" && parts[5]) {
+      src = `host ${parts[5]}`;
+      dst = parts[6]?.toLowerCase() === "host" && parts[7] ? `host ${parts[7]}` : parts[6];
+    } else if (dst?.toLowerCase() === "host" && parts[6]) {
+      dst = `host ${parts[6]}`;
+    }
+    if (
+      !Number.isInteger(id) ||
+      id < 1 ||
+      id > 199 ||
+      (action !== "permit" && action !== "deny") ||
+      !src ||
+      !dst
+    ) {
+      return {
+        output:
+          "% Uso: access-list <1-199> permit|deny ip|icmp <src|any|host X> <dst|any|host Y>",
+      };
+    }
+    const lists = [...(device.accessLists ?? [])];
+    const existing = lists.find((l) => l.id === id);
+    const prevAces = existing?.aces ?? [];
+    const seq =
+      prevAces.length === 0
+        ? 10
+        : Math.max(...prevAces.map((a) => a.sequence)) + 10;
+    const nextList = {
+      id,
+      aces: [
+        ...prevAces,
+        {
+          sequence: seq,
+          action: action as "permit" | "deny",
+          protocol:
+            protocol === "icmp" || protocol === "ip" || protocol === "any"
+              ? protocol
+              : "ip",
+          source: src.toLowerCase() === "any" ? "any" : src,
+          destination: dst.toLowerCase() === "any" ? "any" : dst,
+        },
+      ],
+    };
+    const nextLists = existing
+      ? lists.map((l) => (l.id === id ? nextList : l))
+      : [...lists, nextList];
+    ctx.setState(updateDevice(ctx.state, ctx.deviceId, { accessLists: nextLists }));
+    return { output: "" };
+  }
+
+  if (
+    lower.startsWith("ip access-group ") &&
+    cli.mode === "config-if" &&
+    cli.ifaceId
+  ) {
+    const id = Number(parts[2]);
+    const dir = parts[3]?.toLowerCase();
+    if (!Number.isInteger(id) || (dir !== "in" && dir !== "out")) {
+      return { output: "% Uso: ip access-group <n> in|out" };
+    }
+    const patch =
+      dir === "in" ? { aclIn: id } : { aclOut: id };
+    ctx.setState(updateIface(ctx.state, ctx.deviceId, cli.ifaceId, patch));
+    return { output: "" };
+  }
+
+  if (
+    (lower === "no ip access-group in" || lower === "no ip access-group out") &&
+    cli.mode === "config-if" &&
+    cli.ifaceId
+  ) {
+    const patch = lower.endsWith(" in")
+      ? { aclIn: null }
+      : { aclOut: null };
+    ctx.setState(updateIface(ctx.state, ctx.deviceId, cli.ifaceId, patch));
+    return { output: "" };
+  }
+
+  if (
+    (lower === "show access-lists" ||
+      lower === "show access-list" ||
+      lower === "show ip access-lists" ||
+      lower === "sh access-lists") &&
+    (cli.mode === "enable" || cli.mode === "user")
+  ) {
+    const lists = device.accessLists ?? [];
+    if (lists.length === 0) return { output: "" };
+    const blocks = lists.map((l) => {
+      const lines = l.aces.map(
+        (a) =>
+          `  ${a.sequence} ${a.action} ${a.protocol} ${a.source} ${a.destination}`,
+      );
+      return [`Extended IP access list ${l.id}`, ...lines].join("\n");
+    });
+    return { output: blocks.join("\n") };
+  }
+
+  if (
     (lower === "no shutdown" || lower === "no shut") &&
     cli.mode === "config-if" &&
     cli.ifaceId
@@ -648,14 +809,42 @@ export function runRouterCommand(
     (cli.mode === "enable" || cli.mode === "user")
   ) {
     const blocks = device.interfaces.map((i) => {
-      const lineProto = i.connectedLinkId ? "up" : "down";
+      let lineProto = i.connectedLinkId ? "up" : "down";
+      if (i.media === "serial" && i.connectedLinkId) {
+        const link = ctx.state.links.find((l) => l.id === i.connectedLinkId);
+        const peerId =
+          link &&
+          (link.aDeviceId === device.id ? link.bDeviceId : link.aDeviceId);
+        const peerIfId =
+          link &&
+          (link.aDeviceId === device.id ? link.bIfaceId : link.aIfaceId);
+        const peer = peerId ? getDevice(ctx.state, peerId) : null;
+        const peerIf = peer?.interfaces.find((x) => x.id === peerIfId);
+        const hasClock =
+          (i.clockRate != null && i.clockRate > 0) ||
+          (peerIf?.clockRate != null && peerIf.clockRate > 0);
+        if (!hasClock) lineProto = "down";
+      }
+      const hw =
+        i.media === "serial"
+          ? "Serial"
+          : i.media === "wireless"
+            ? "802.11 Radio"
+            : "Gigabit Ethernet";
       return [
         `${i.name} is ${i.enabled ? "up" : "administratively down"}, line protocol is ${lineProto}`,
-        `  Hardware is Gigabit Ethernet, address is ${i.mac}`,
+        `  Hardware is ${hw}, address is ${i.mac}`,
+        i.media === "serial" && i.clockRate
+          ? `  Clock rate is ${i.clockRate}`
+          : null,
+        i.aclIn != null ? `  Inbound access list is ${i.aclIn}` : null,
+        i.aclOut != null ? `  Outbound access list is ${i.aclOut}` : null,
         i.ip
           ? `  Internet address is ${i.ip}/${maskToCidr(i.mask ?? "255.255.255.0") ?? 24}`
           : `  Internet protocol processing disabled`,
-      ].join("\n");
+      ]
+        .filter(Boolean)
+        .join("\n");
     });
     return { output: blocks.join("\n") };
   }

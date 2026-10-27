@@ -335,6 +335,11 @@ function blankIface(
     moduleId,
     parentIfaceId: null,
     vlanTag: null,
+    dhcpClient: false,
+    dnsServers: [],
+    clockRate: null,
+    aclIn: null,
+    aclOut: null,
   };
 }
 
@@ -410,7 +415,11 @@ export function interfacesFromModules(
           media,
           moduleId: mod.id,
           parentIfaceId: null,
-          // keep ip/mac/link if same module retained
+          dhcpClient: reuse.dhcpClient ?? false,
+          dnsServers: reuse.dnsServers ?? [],
+          clockRate: reuse.clockRate ?? null,
+          aclIn: reuse.aclIn ?? null,
+          aclOut: reuse.aclOut ?? null,
         });
       } else {
         physical.push(blankIface(deviceId, name, media, mod.id, uid));

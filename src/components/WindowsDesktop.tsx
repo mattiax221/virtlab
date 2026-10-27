@@ -8,10 +8,11 @@ import {
 import type { Device, LabState } from "@/lib/network/types";
 import { NetworkConnections } from "./NetworkConnections";
 import { PhysicalPanel } from "./PhysicalPanel";
+import { ServerServices } from "./ServerServices";
 import { Terminal } from "./Terminal";
 import { WifiTray } from "./WifiTray";
 
-type AppWindow = "network" | "cmd" | "physical" | null;
+type AppWindow = "network" | "cmd" | "physical" | "services" | null;
 
 export function WindowsDesktop({
   device,
@@ -105,6 +106,14 @@ export function WindowsDesktop({
               active={app === "physical"}
               onClick={() => setApp("physical")}
             />
+            {live.type === "server" && (
+              <DesktopIcon
+                label="Servizi"
+                kind="svc"
+                active={app === "services"}
+                onClick={() => setApp("services")}
+              />
+            )}
           </div>
 
           {app && (
@@ -141,6 +150,14 @@ export function WindowsDesktop({
                     setState={setState}
                   />
                 </>
+              )}
+              {app === "services" && live.type === "server" && (
+                <ServerServices
+                  device={device}
+                  stateRef={stateRef}
+                  setState={setState}
+                  onClose={() => setApp(null)}
+                />
               )}
               {app === "cmd" && (
                 <>
@@ -205,6 +222,11 @@ export function WindowsDesktop({
                 Physical
               </div>
             )}
+            {app === "services" && (
+              <div className="rounded bg-slate-800 px-3 py-1 text-xs text-slate-200">
+                Servizi
+              </div>
+            )}
             <div className="ml-auto flex items-center gap-1 pr-1">
               <WifiTray
                 device={device}
@@ -227,7 +249,7 @@ function DesktopIcon({
   onClick,
 }: {
   label: string;
-  kind: "pc" | "cmd" | "net" | "phys";
+  kind: "pc" | "cmd" | "net" | "phys" | "svc";
   active?: boolean;
   onClick: () => void;
 }) {
@@ -242,6 +264,8 @@ function DesktopIcon({
       <div className="flex h-10 w-10 items-center justify-center rounded bg-slate-900/40">
         {kind === "cmd" ? (
           <span className="font-mono text-sm text-emerald-300">&gt;_</span>
+        ) : kind === "svc" ? (
+          <span className="text-sm font-bold text-amber-200">S</span>
         ) : kind === "net" ? (
           <svg viewBox="0 0 24 24" className="h-5 w-5 text-sky-200" fill="none" stroke="currentColor" strokeWidth="1.8">
             <circle cx="6" cy="12" r="2.5" />

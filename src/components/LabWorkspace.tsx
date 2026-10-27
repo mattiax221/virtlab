@@ -13,6 +13,13 @@ import {
 } from "@/lib/network/engine";
 import { CABLE_META, PT_PALETTE, type CableKind } from "@/lib/network/catalog";
 import {
+  autosaveLab,
+  downloadLab,
+  loadAutosave,
+  parseLabJson,
+} from "@/lib/network/persist";
+import { buildPingSimulation, type SimPacket } from "@/lib/network/simulation";
+import {
   DEVICE_META,
   isEndHost,
   type Device,
@@ -21,13 +28,15 @@ import {
 } from "@/lib/network/types";
 import { ContextMenu, type MenuItem } from "./ContextMenu";
 import { DeviceIcon } from "./DeviceIcon";
+import { ExercisesPanel } from "./ExercisesPanel";
 import { RouterConsole } from "./RouterConsole";
+import { SimOverlay } from "./SimOverlay";
 import { SimpleDevicePanel } from "./SimpleDevicePanel";
 import { SwitchPanel } from "./SwitchPanel";
 import { WifiApPanel } from "./WifiApPanel";
 import { WindowsDesktop } from "./WindowsDesktop";
 
-type Tool = "select" | "cable" | "delete";
+type Tool = "select" | "cable" | "delete" | "simulate";
 type OpenMode = "sim" | "panel" | "switch" | "router" | "wifi";
 
 type CtxTarget =
@@ -81,10 +90,13 @@ function modeFor(device: Device): OpenMode {
 }
 
 export function LabWorkspace() {
-  const [state, setState] = useState<LabState>(() => createDemoLab());
+  const [state, setState] = useState<LabState>(() => loadAutosave() ?? createDemoLab());
   const stateRef = useRef(state);
   useEffect(() => {
     stateRef.current = state;
+  }, [state]);
+  useEffect(() => {
+    autosaveLab(state);
   }, [state]);
 
   const [tool, setTool] = useState<Tool>("select");
@@ -101,6 +113,10 @@ export function LabWorkspace() {
   const [category, setCategory] = useState<string>(PT_PALETTE[0].title);
   const [filter, setFilter] = useState("");
   const [inspectId, setInspectId] = useState<string | null>(null);
+  const [simPackets, setSimPackets] = useState<SimPacket[] | null>(null);
+  const [simFrom, setSimFrom] = useState<string | null>(null);
+  const [showExercises, setShowExercises] = useState(true);
+  const fileRef = useRef<HTMLInputElement>(null);
 
   const canvasRef = useRef<HTMLDivElement>(null);
 
@@ -179,6 +195,25 @@ export function LabWorkspace() {
       showToast(`Eliminato ${device.name}`);
       return;
     }
+    if (tool === "simulate") {
+      if (!simFrom) {
+        setSimFrom(device.id);
+        setSelectedId(device.id);
+        showToast("Simulation: seleziona la destinazione");
+        return;
+      }
+      if (simFrom === device.id) return;
+      const target =
+        state.devices.find((d) => d.id === device.id)?.interfaces.find((i) => i.ip)
+          ?.ip ?? device.name;
+      const built = buildPingSimulation(state, simFrom, target);
+      setState(built.state);
+      setSimPackets(built.packets);
+      showToast(built.packets.length ? "Simulation avviata" : built.message);
+      setSimFrom(null);
+      setTool("select");
+      return;
+    }
     if (tool === "cable") {
       if (!cableFrom) {
         setCableFrom(device.id);
@@ -248,6 +283,15 @@ export function LabWorkspace() {
           type: "item",
           label: "Collega cavo…",
           onClick: () => startCableFrom(d.id),
+        },
+        {
+          type: "item",
+          label: "Simula ping da qui…",
+          onClick: () => {
+            setTool("simulate");
+            setSimFrom(d.id);
+            showToast("Clicca la destinazione");
+          },
         },
         { type: "sep" },
         {
@@ -404,6 +448,7 @@ export function LabWorkspace() {
           onClick={() => {
             setTool("select");
             setCableFrom(null);
+            setSimFrom(null);
           }}
         >
           Seleziona
@@ -413,6 +458,7 @@ export function LabWorkspace() {
           onClick={() => {
             setTool("cable");
             setCableFrom(null);
+            setSimFrom(null);
           }}
         >
           Cavo
@@ -436,17 +482,58 @@ export function LabWorkspace() {
           onClick={() => {
             setTool("delete");
             setCableFrom(null);
+            setSimFrom(null);
           }}
         >
           Elimina
         </ToolButton>
+        <ToolButton
+          active={tool === "simulate"}
+          onClick={() => {
+            setTool("simulate");
+            setCableFrom(null);
+            setSimFrom(null);
+            showToast("Simulation: clicca sorgente poi destinazione");
+          }}
+        >
+          Simulation
+        </ToolButton>
 
         <div className="ml-auto flex items-center gap-2">
-          {cableFrom && (
+          {(cableFrom || simFrom) && (
             <span className="hidden text-[11px] text-amber-300/90 sm:inline">
-              Cavo in corso…
+              {simFrom ? "Sim… destinazione" : "Cavo in corso…"}
             </span>
           )}
+          <ToolButton
+            onClick={() => {
+              downloadLab(state);
+              showToast("Lab salvato (JSON)");
+            }}
+          >
+            Salva
+          </ToolButton>
+          <ToolButton onClick={() => fileRef.current?.click()}>Carica</ToolButton>
+          <input
+            ref={fileRef}
+            type="file"
+            accept="application/json,.json"
+            className="hidden"
+            onChange={async (e) => {
+              const file = e.target.files?.[0];
+              e.target.value = "";
+              if (!file) return;
+              const text = await file.text();
+              const parsed = parseLabJson(text);
+              if (parsed.error || !parsed.state) {
+                showToast(parsed.error ?? "Caricamento fallito");
+                return;
+              }
+              setState(parsed.state);
+              closeOpen();
+              showToast("Lab caricato");
+            }}
+          />
           <ToolButton
             onClick={() => {
               setState(createDemoLab());
@@ -536,7 +623,9 @@ export function LabWorkspace() {
               key={device.id}
               type="button"
               className={`absolute flex w-[5.5rem] -translate-x-1/2 -translate-y-1/2 flex-col items-center gap-0.5 rounded-lg p-1.5 transition ${
-                selectedId === device.id || cableFrom === device.id
+                selectedId === device.id ||
+                cableFrom === device.id ||
+                simFrom === device.id
                   ? "bg-sky-500/20 ring-2 ring-sky-400"
                   : "hover:bg-white/5"
               }`}
@@ -617,11 +706,40 @@ export function LabWorkspace() {
           )}
         </div>
 
-        {toast && (
-          <div className="pointer-events-none absolute left-1/2 top-3 z-30 -translate-x-1/2 rounded-full border border-slate-600/80 bg-slate-900/95 px-4 py-1.5 text-sm text-slate-100 shadow-lg">
-            {toast}
-          </div>
-        )}
+          {simPackets && (
+            <SimOverlay
+              packets={simPackets}
+              onDone={() => setSimPackets(null)}
+            />
+          )}
+
+          {showExercises && (
+            <div className="absolute bottom-3 right-3 z-20 w-72">
+              <ExercisesPanel state={state} />
+              <button
+                type="button"
+                className="mt-1 text-[10px] text-slate-500 hover:text-slate-300"
+                onClick={() => setShowExercises(false)}
+              >
+                Nascondi esercizi
+              </button>
+            </div>
+          )}
+          {!showExercises && (
+            <button
+              type="button"
+              className="absolute bottom-3 right-3 z-20 rounded border border-slate-700 bg-slate-900/90 px-2 py-1 text-[10px] text-slate-400"
+              onClick={() => setShowExercises(true)}
+            >
+              Esercizi
+            </button>
+          )}
+
+          {toast && (
+            <div className="pointer-events-none absolute left-1/2 top-3 z-30 -translate-x-1/2 rounded-full border border-slate-600/80 bg-slate-900/95 px-4 py-1.5 text-sm text-slate-100 shadow-lg">
+              {toast}
+            </div>
+          )}
       </main>
 
       <footer className="relative z-20 shrink-0 border-t border-[var(--lab-line)] bg-[var(--lab-panel)]">

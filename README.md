@@ -14,6 +14,13 @@ Laboratorio stile **Cisco Packet Tracer** nel browser.
   `show mac address-table`, `show interfaces status`, isolamento tra VLAN
 - **Inter-VLAN**: router-on-a-stick (`interface Gi0/0.10` + `encapsulation dot1Q`)
 - **Physical**: spegni il device → rimuovi/aggiungi moduli (Ethernet, Wi‑Fi, WIC, uplink)
+- **Wi‑Fi**: tray stile Windows, scan SSID dagli AP, WPA2
+- **DHCP / DNS / HTTP** sul Server-PT (`ipconfig /renew`, `ping server.lab`, `http www.lab`)
+- **Salva / Carica** lab in JSON + autosave locale
+- **Simulation**: animazione hop-by-hop (ARP + ICMP)
+- **WAN Serial**: cavo Serial + `clock rate` sul DCE
+- **ACL** base Cisco-like (`access-list`, `ip access-group`)
+- Checklist esercizi in canvas
 - Motore L2/L3 con flood VLAN-aware + learning MAC
 
 ## Avvio

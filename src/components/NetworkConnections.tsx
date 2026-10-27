@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { updateIface } from "@/lib/network/engine";
+import { requestDhcp } from "@/lib/network/services";
 import type { Device, LabState } from "@/lib/network/types";
 
 type View = "folder" | "adapter" | "tcpip";
@@ -113,14 +114,19 @@ export function NetworkConnections({
   function applyTcpIp() {
     if (!iface) return;
     if (dhcp) {
-      const next = updateIface(stateRef.current, device.id, iface.id, {
-        ip: null,
-        mask: null,
-        gateway: null,
-      });
-      stateRef.current = next;
-      setState(next);
-      setToast("DHCP: nessun server DHCP nel lab — configura un IP statico.");
+      const res = requestDhcp(stateRef.current, device.id, iface.id);
+      stateRef.current = res.state;
+      setState(res.state);
+      setToast(res.message);
+      if (res.ok) {
+        const d =
+          res.state.devices.find((x) => x.id === device.id) ?? device;
+        const i = d.interfaces.find((x) => x.id === iface.id);
+        setIp(i?.ip ?? "");
+        setMask(i?.mask ?? "255.255.255.0");
+        setGw(i?.gateway ?? "");
+        setDns(i?.dnsServers?.[0] ?? "");
+      }
       setView("adapter");
       return;
     }
@@ -141,14 +147,17 @@ export function NetworkConnections({
         return;
       }
     }
+    const dnsList = !dnsAuto && dns.trim() ? [dns.trim()] : [];
     const next = updateIface(stateRef.current, device.id, iface.id, {
       ip,
       mask,
       gateway: gw || null,
+      dhcpClient: false,
+      dnsServers: dnsList,
     });
     stateRef.current = next;
     setState(next);
-    setToast(`IP impostato: ${ip}`);
+    setToast(`IP statico: ${ip}`);
     setView("adapter");
   }
 
