@@ -13,6 +13,11 @@ import {
 } from "@/lib/network/engine";
 import { CABLE_META, PT_PALETTE, type CableKind } from "@/lib/network/catalog";
 import {
+  draftCableStatus,
+  evaluateLink,
+  linkHealthLabel,
+} from "@/lib/network/linkStatus";
+import {
   downloadHtmlSnapshot,
   downloadInventoryCsv,
   downloadPng,
@@ -163,12 +168,30 @@ export function LabWorkspace() {
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
   const [shareBusy, setShareBusy] = useState(false);
+  /** Link appena creati: arancio “collegamento…” poi diventano verdi/rossi */
+  const [connectingIds, setConnectingIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [cableCursor, setCableCursor] = useState<{ x: number; y: number } | null>(
+    null,
+  );
   const fileRef = useRef<HTMLInputElement>(null);
   const historyRef = useRef<LabState[]>([]);
   const redoRef = useRef<LabState[]>([]);
   const shareLoadedRef = useRef(false);
 
   const canvasRef = useRef<HTMLDivElement>(null);
+
+  const markConnecting = useCallback((linkId: string) => {
+    setConnectingIds((prev) => new Set(prev).add(linkId));
+    window.setTimeout(() => {
+      setConnectingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(linkId);
+        return next;
+      });
+    }, 900);
+  }, []);
 
   const showToast = useCallback((msg: string) => {
     setToast(msg);
@@ -362,6 +385,7 @@ export function LabWorkspace() {
 
   const cancelCable = useCallback(() => {
     setCableDraft(null);
+    setCableCursor(null);
     setTool("select");
   }, []);
 
@@ -907,12 +931,24 @@ export function LabWorkspace() {
         <div
           ref={canvasRef}
           className="lab-grid absolute inset-0 overflow-hidden"
-          onPointerMove={onCanvasPointerMove}
+          onPointerMove={(e) => {
+            onCanvasPointerMove(e);
+            if (cableDraft) {
+              const rect = canvasRef.current?.getBoundingClientRect();
+              if (rect) {
+                setCableCursor({
+                  x: e.clientX - rect.left,
+                  y: e.clientY - rect.top,
+                });
+              }
+            }
+          }}
           onPointerUp={() => {
             setDrag(null);
           }}
           onPointerLeave={() => {
             setDrag(null);
+            if (!cableDraft) setCableCursor(null);
           }}
           onClick={() => {
             setCtx(null);
@@ -929,11 +965,20 @@ export function LabWorkspace() {
               const meta = CABLE_META[link.media] ?? CABLE_META.straight;
               const aIf = a.interfaces.find((i) => i.id === link.aIfaceId);
               const bIf = b.interfaces.find((i) => i.id === link.bIfaceId);
+              const status = evaluateLink(state, link, {
+                connecting: connectingIds.has(link.id),
+              });
               const ax = a.x + (b.x - a.x) * 0.2;
               const ay = a.y + (b.y - a.y) * 0.2;
               const bx = a.x + (b.x - a.x) * 0.8;
               const by = a.y + (b.y - a.y) * 0.8;
-              const tip = `${a.name}:${aIf ? shortPortName(aIf.name) : "?"} ↔ ${b.name}:${bIf ? shortPortName(bIf.name) : "?"} (${meta.label})`;
+              const tip = `${linkHealthLabel(status.health)} — ${status.reason}\n${a.name}:${aIf ? shortPortName(aIf.name) : "?"} ↔ ${b.name}:${bIf ? shortPortName(bIf.name) : "?"} (${meta.label})`;
+              const dash =
+                status.health === "connecting"
+                  ? "6 4"
+                  : status.health === "down"
+                    ? "5 5"
+                    : meta.dash;
               return (
                 <g key={link.id} style={{ pointerEvents: "stroke" }}>
                   <line
@@ -941,10 +986,19 @@ export function LabWorkspace() {
                     y1={a.y}
                     x2={b.x}
                     y2={b.y}
-                    stroke={meta.color}
-                    strokeWidth="2.5"
-                    strokeOpacity="0.9"
-                    strokeDasharray={meta.dash}
+                    stroke={status.color}
+                    strokeWidth={status.health === "up" ? 2.5 : 3}
+                    strokeOpacity={status.health === "down" ? 0.85 : 0.95}
+                    strokeDasharray={dash}
+                  />
+                  {/* LED al centro del cavo */}
+                  <circle
+                    cx={(a.x + b.x) / 2}
+                    cy={(a.y + b.y) / 2}
+                    r={4}
+                    fill={status.color}
+                    stroke="#020617"
+                    strokeWidth="1"
                   />
                   <line
                     x1={a.x}
@@ -970,7 +1024,9 @@ export function LabWorkspace() {
                         applyState((s) => deleteLink(s, link.id));
                         showToast("Cavo rimosso");
                       } else {
-                        showToast(tip);
+                        showToast(
+                          `${linkHealthLabel(status.health)}: ${status.reason}`,
+                        );
                       }
                     }}
                   >
@@ -1027,7 +1083,60 @@ export function LabWorkspace() {
                 </g>
               );
             })}
+            {/* Anteprima cavo in fase di collegamento (arancio) */}
+            {cableDraft &&
+              (() => {
+                const from = state.devices.find(
+                  (d) => d.id === cableDraft.fromDeviceId,
+                );
+                if (!from) return null;
+                const to = cableDraft.toDeviceId
+                  ? state.devices.find((d) => d.id === cableDraft.toDeviceId)
+                  : null;
+                const end = to
+                  ? { x: to.x, y: to.y }
+                  : cableCursor;
+                if (!end) return null;
+                const st = draftCableStatus();
+                return (
+                  <g key="draft-cable">
+                    <line
+                      x1={from.x}
+                      y1={from.y}
+                      x2={end.x}
+                      y2={end.y}
+                      stroke={st.color}
+                      strokeWidth="2.5"
+                      strokeDasharray="7 5"
+                      strokeOpacity="0.95"
+                    />
+                    <circle
+                      cx={(from.x + end.x) / 2}
+                      cy={(from.y + end.y) / 2}
+                      r={4}
+                      fill={st.color}
+                      stroke="#020617"
+                      strokeWidth="1"
+                    />
+                  </g>
+                );
+              })()}
           </svg>
+
+          <div className="pointer-events-none absolute bottom-3 right-3 z-20 flex gap-3 rounded-md border border-slate-700/80 bg-slate-950/90 px-2.5 py-1.5 text-[10px] text-slate-300">
+            <span className="flex items-center gap-1">
+              <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" />
+              Connesso
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="inline-block h-2 w-2 rounded-full bg-amber-500" />
+              Collegamento…
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="inline-block h-2 w-2 rounded-full bg-red-500" />
+              Errore / spento
+            </span>
+          </div>
 
           {state.devices.length === 0 && (
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
@@ -1395,11 +1504,22 @@ export function LabWorkspace() {
               "?";
             const bName =
               b?.interfaces.find((i) => i.id === ifaceId)?.name ?? "?";
+            const newLink = result.state.links.find(
+              (l) =>
+                !state.links.some((old) => old.id === l.id),
+            );
             applyState(result.state);
+            if (newLink) markConnecting(newLink.id);
             setCableDraft(null);
+            setCableCursor(null);
             setTool("select");
+            const st = newLink
+              ? evaluateLink(result.state, newLink, { connecting: true })
+              : null;
             showToast(
-              `Collegato ${a?.name}:${shortPortName(aName)} ↔ ${b?.name}:${shortPortName(bName)}`,
+              st
+                ? `${linkHealthLabel(st.health)}: ${a?.name}:${shortPortName(aName)} ↔ ${b?.name}:${shortPortName(bName)}`
+                : `Collegato ${a?.name}:${shortPortName(aName)} ↔ ${b?.name}:${shortPortName(bName)}`,
             );
           }}
         />
