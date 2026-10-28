@@ -354,6 +354,13 @@ export const releases: ChangelogEntry[] = [
     detail:
       "Tolte note interne dalla pagina Changelog; workflow: GitHub pubblico → Vercel → /changelog.",
   },
+  {
+    sha: "pending",
+    date: "2026-10-28",
+    title: "Target GitHub mattiax221/virtlab",
+    detail:
+      "Repo pubblico https://github.com/mattiax221/virtlab — in attesa di push autenticato.",
+  },
 ];
 
 /** Roadmap NetLab — Packet Tracer didattico nel browser. */

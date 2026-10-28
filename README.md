@@ -46,8 +46,10 @@ Gateway opzionale (stesso origine): `npm run gateway` → porta 43130.
 
 ## Pubblicazione (GitHub + Vercel)
 
-1. **GitHub** (repo pubblico): push del branch `main`.
-2. **Vercel**: Import del repo → Framework Next.js → Deploy.
-3. **Changelog**: ogni rilascio aggiorna `/changelog` (lista release + roadmap).
+Repo pubblico: [github.com/mattiax221/virtlab](https://github.com/mattiax221/virtlab)
 
-Dopo ogni update: codice su GitHub → redeploy Vercel → voce in changelog.
+1. **GitHub**: push su `main` → `https://github.com/mattiax221/virtlab.git`
+2. **Vercel**: Import del repo → Framework Next.js → Deploy
+3. **Changelog**: ogni rilascio aggiorna `/changelog`
+
+Dopo ogni update: GitHub → Vercel → `/changelog`.
