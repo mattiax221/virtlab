@@ -249,7 +249,7 @@ export const releases: ChangelogEntry[] = [
     detail: "Checklist lab spostata da overlay canvas a /esercizi (legge autosave).",
   },
   {
-    sha: "pending",
+    sha: "9d147df",
     date: "2026-10-28",
     title: "AAA, STP/unicast, PPPoE/VPN, mobile",
     detail:
