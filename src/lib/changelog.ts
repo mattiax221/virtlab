@@ -334,6 +334,13 @@ export const releases: ChangelogEntry[] = [
     detail:
       "Config IP/DHCP, Physical, Services PRINT e coda; dai PC: print/lpr <ip>.",
   },
+  {
+    sha: "d3c9499",
+    date: "2026-10-28",
+    title: "Stampa remota animata",
+    detail:
+      "Job LPR con PDU PRINT sulla topologia; Desktop → Printers; pulse sulla stampante.",
+  },
 ];
 
 /**
