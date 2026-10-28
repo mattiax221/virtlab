@@ -31,6 +31,7 @@ import {
 } from "@/lib/network/simulation";
 import { EmailClient } from "./EmailClient";
 import { HostFirewallPanel } from "./HostFirewall";
+import { MibBrowser } from "./MibBrowser";
 import { NetworkConnections } from "./NetworkConnections";
 import { PhysicalPanel } from "./PhysicalPanel";
 import { PppoeDialer } from "./PppoeDialer";
@@ -111,7 +112,7 @@ const SHORTCUTS_WIN: Shortcut[] = [
   { id: "rdp", label: "Remote Desktop", icon: "rdp" },
   { id: "ssh", label: "Telnet / SSH", icon: "ssh" },
   { id: "firewall", label: "Firewall", icon: "firewall" },
-  { id: "mib", label: "MIB Browser", icon: "mib", stub: true },
+  { id: "mib", label: "MIB Browser", icon: "mib" },
   { id: "voip", label: "IP Communicator", icon: "voip", stub: true },
   { id: "physical", label: "Physical", icon: "physical" },
   { id: "services", label: "Services", icon: "services", serverOnly: true },
@@ -131,7 +132,7 @@ const SHORTCUTS_LINUX: Shortcut[] = [
   { id: "rdp", label: "Remote Desktop", icon: "rdp" },
   { id: "ssh", label: "Telnet / SSH", icon: "ssh" },
   { id: "firewall", label: "Firewall", icon: "firewall" },
-  { id: "mib", label: "MIB Browser", icon: "mib", stub: true },
+  { id: "mib", label: "MIB Browser", icon: "mib" },
   { id: "voip", label: "IP Communicator", icon: "voip", stub: true },
   { id: "physical", label: "Physical", icon: "physical" },
   { id: "services", label: "Services", icon: "services", serverOnly: true },
@@ -144,6 +145,7 @@ export function WindowsDesktop({
   onClose,
   onSimulate,
   nested = false,
+  viaHost,
 }: {
   device: Device;
   stateRef: React.MutableRefObject<LabState>;
@@ -152,6 +154,8 @@ export function WindowsDesktop({
   onSimulate?: (packets: SimPacket[], message: string) => void;
   /** Sessione Remote Desktop annidata (niente altro RDP ricorsivo) */
   nested?: boolean;
+  /** Nome dell’host da cui è partita la sessione RDP */
+  viaHost?: string;
 }) {
   const live =
     stateRef.current.devices.find((d) => d.id === device.id) ?? device;
@@ -226,6 +230,7 @@ export function WindowsDesktop({
         setState={setState}
         onSimulate={onSimulate}
         nested
+        viaHost={live.name}
         onClose={() => setRemoteTarget(null)}
       />
     );
@@ -234,13 +239,33 @@ export function WindowsDesktop({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-0 backdrop-blur-sm sm:p-6">
       <div className="flex h-[100dvh] w-full max-w-5xl flex-col overflow-hidden border-0 border-slate-600/60 shadow-2xl sm:h-[min(760px,94vh)] sm:rounded-lg sm:border">
+        {nested && (
+          <div className="flex items-center justify-between gap-2 bg-emerald-700 px-3 py-1.5 text-[11px] text-white">
+            <span>
+              Sessione remota:{" "}
+              <strong>{viaHost ?? "host locale"}</strong>
+              {" → "}
+              <strong>{live.name}</strong>
+              <span className="ml-2 opacity-80">
+                (stai usando il Desktop di {live.name})
+              </span>
+            </span>
+            <button
+              type="button"
+              className="rounded bg-emerald-900/50 px-2 py-0.5 font-semibold hover:bg-rose-600"
+              onClick={onClose}
+            >
+              Disconnetti
+            </button>
+          </div>
+        )}
         <div className="flex items-center justify-between bg-slate-900 px-3 py-2 text-sm text-slate-200">
           <div className="flex items-center gap-2">
             <span
               className={`inline-block h-2.5 w-2.5 rounded-full ${live.powered ? "bg-emerald-400" : "bg-slate-500"}`}
             />
             <span className="font-medium">
-              {nested ? "Remote Desktop — " : "Desktop — "}
+              {nested ? "Desktop remoto — " : "Desktop — "}
               {live.name}
             </span>
             <span className="hidden text-slate-500 sm:inline">
@@ -359,6 +384,14 @@ export function WindowsDesktop({
               )}
               {app === "firewall" && (
                 <HostFirewallPanel
+                  device={device}
+                  stateRef={stateRef}
+                  setState={setState}
+                  onClose={() => setApp(null)}
+                />
+              )}
+              {app === "mib" && (
+                <MibBrowser
                   device={device}
                   stateRef={stateRef}
                   setState={setState}

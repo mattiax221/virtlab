@@ -147,9 +147,15 @@ export function LabWorkspace() {
   const [openDeviceId, setOpenDeviceId] = useState<string | null>(null);
   const [openMode, setOpenMode] = useState<OpenMode | null>(null);
   const [toast, setToast] = useState<string | null>(null);
-  const [drag, setDrag] = useState<{ id: string; ox: number; oy: number } | null>(
-    null,
-  );
+  const [drag, setDrag] = useState<{
+    id: string;
+    ox: number;
+    oy: number;
+    x: number;
+    y: number;
+    moved: boolean;
+  } | null>(null);
+  const dragSnapRef = useRef<{ x: number; y: number } | null>(null);
   const [paletteDrag, setPaletteDrag] = useState<{
     type: DeviceKind;
     x: number;
@@ -480,12 +486,16 @@ export function LabWorkspace() {
     setSelectedId(device.id);
     const rect = canvasRef.current?.getBoundingClientRect();
     if (!rect) return;
+    dragSnapRef.current = { x: device.x, y: device.y };
     setDrag({
       id: device.id,
       ox: e.clientX - rect.left - device.x,
       oy: e.clientY - rect.top - device.y,
+      x: device.x,
+      y: device.y,
+      moved: false,
     });
-    (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+    (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
   }
 
   function onCanvasPointerMove(e: React.PointerEvent) {
@@ -500,7 +510,28 @@ export function LabWorkspace() {
       48,
       Math.min(rect.height - 48, e.clientY - rect.top - drag.oy),
     );
-    setState((s) => moveDevice(s, drag.id, snap(rawX), snap(rawY)));
+    const sx = snap(rawX);
+    const sy = snap(rawY);
+    const moved =
+      drag.moved || Math.hypot(sx - drag.x, sy - drag.y) >= GRID / 2;
+    // Anteprima fluida (posizione grezza) senza martellare lo state a ogni pixel
+    setDrag((d) =>
+      d ? { ...d, x: rawX, y: rawY, moved } : d,
+    );
+    const prev = dragSnapRef.current;
+    if (!moved || (prev && prev.x === sx && prev.y === sy)) return;
+    dragSnapRef.current = { x: sx, y: sy };
+    setState((s) => moveDevice(s, drag.id, sx, sy));
+  }
+
+  function endDrag() {
+    if (drag && drag.moved) {
+      const sx = snap(drag.x);
+      const sy = snap(drag.y);
+      setState((s) => moveDevice(s, drag.id, sx, sy));
+    }
+    dragSnapRef.current = null;
+    setDrag(null);
   }
 
   function openContext(e: React.MouseEvent, target: CtxTarget) {
@@ -969,11 +1000,14 @@ export function LabWorkspace() {
             }
           }}
           onPointerUp={() => {
-            setDrag(null);
+            endDrag();
+          }}
+          onPointerCancel={() => {
+            endDrag();
           }}
           onPointerLeave={() => {
-            setDrag(null);
-            if (!cableDraft) setCableCursor(null);
+            // Non annullare il drag: con pointer capture continua sul canvas
+            if (!cableDraft && !drag) setCableCursor(null);
           }}
           onClick={() => {
             setCtx(null);
@@ -987,16 +1021,25 @@ export function LabWorkspace() {
               const a = state.devices.find((d) => d.id === link.aDeviceId);
               const b = state.devices.find((d) => d.id === link.bDeviceId);
               if (!a || !b) return null;
+              // Durante il drag i cavi seguono l’anteprima
+              const ax0 =
+                drag?.id === a.id && drag.moved ? drag.x : a.x;
+              const ay0 =
+                drag?.id === a.id && drag.moved ? drag.y : a.y;
+              const bx0 =
+                drag?.id === b.id && drag.moved ? drag.x : b.x;
+              const by0 =
+                drag?.id === b.id && drag.moved ? drag.y : b.y;
               const meta = CABLE_META[link.media] ?? CABLE_META.straight;
               const aIf = a.interfaces.find((i) => i.id === link.aIfaceId);
               const bIf = b.interfaces.find((i) => i.id === link.bIfaceId);
               const status = evaluateLink(state, link, {
                 connecting: connectingIds.has(link.id),
               });
-              const ax = a.x + (b.x - a.x) * 0.2;
-              const ay = a.y + (b.y - a.y) * 0.2;
-              const bx = a.x + (b.x - a.x) * 0.8;
-              const by = a.y + (b.y - a.y) * 0.8;
+              const ax = ax0 + (bx0 - ax0) * 0.2;
+              const ay = ay0 + (by0 - ay0) * 0.2;
+              const bx = ax0 + (bx0 - ax0) * 0.8;
+              const by = ay0 + (by0 - ay0) * 0.8;
               const tip = `${linkHealthLabel(status.health)} — ${status.reason}\n${a.name}:${aIf ? shortPortName(aIf.name) : "?"} ↔ ${b.name}:${bIf ? shortPortName(bIf.name) : "?"} (${meta.label})`;
               const dash =
                 status.health === "connecting"
@@ -1005,13 +1048,13 @@ export function LabWorkspace() {
                     ? "5 5"
                     : meta.dash;
               // Triangoli link-light stile Packet Tracer vicino a ogni estremità
-              const dx = b.x - a.x;
-              const dy = b.y - a.y;
+              const dx = bx0 - ax0;
+              const dy = by0 - ay0;
               const len = Math.hypot(dx, dy) || 1;
               const ux = dx / len;
               const uy = dy / len;
-              const tA = { x: a.x + ux * 28, y: a.y + uy * 28 };
-              const tB = { x: b.x - ux * 28, y: b.y - uy * 28 };
+              const tA = { x: ax0 + ux * 28, y: ay0 + uy * 28 };
+              const tB = { x: bx0 - ux * 28, y: by0 - uy * 28 };
               const tri = (cx: number, cy: number, towardX: number, towardY: number) => {
                 const px = -towardY;
                 const py = towardX;
@@ -1020,10 +1063,10 @@ export function LabWorkspace() {
               return (
                 <g key={link.id} style={{ pointerEvents: "stroke" }}>
                   <line
-                    x1={a.x}
-                    y1={a.y}
-                    x2={b.x}
-                    y2={b.y}
+                    x1={ax0}
+                    y1={ay0}
+                    x2={bx0}
+                    y2={by0}
                     stroke={status.color}
                     strokeWidth={status.health === "up" ? 2.5 : 3}
                     strokeOpacity={status.health === "down" ? 0.85 : 0.95}
@@ -1042,10 +1085,10 @@ export function LabWorkspace() {
                     strokeWidth="0.8"
                   />
                   <line
-                    x1={a.x}
-                    y1={a.y}
-                    x2={b.x}
-                    y2={b.y}
+                    x1={ax0}
+                    y1={ay0}
+                    x2={bx0}
+                    y2={by0}
                     stroke="transparent"
                     strokeWidth="16"
                     className="cursor-pointer"
@@ -1211,7 +1254,18 @@ export function LabWorkspace() {
                       ? "bg-sky-500/20 ring-2 ring-sky-400"
                       : "hover:bg-white/5"
                 }`}
-                style={{ left: device.x, top: device.y }}
+                style={{
+                  left:
+                    drag?.id === device.id && drag.moved ? drag.x : device.x,
+                  top:
+                    drag?.id === device.id && drag.moved ? drag.y : device.y,
+                  transition:
+                    drag?.id === device.id
+                      ? "none"
+                      : "left 120ms ease-out, top 120ms ease-out",
+                  zIndex: drag?.id === device.id ? 30 : undefined,
+                  cursor: drag?.id === device.id ? "grabbing" : "grab",
+                }}
                 onPointerDown={(e) => onDevicePointerDown(e, device)}
                 onDoubleClick={(e) => {
                   e.stopPropagation();
@@ -1223,7 +1277,9 @@ export function LabWorkspace() {
               >
                 <DeviceIcon
                   type={device.type}
-                  className="h-11 w-11 drop-shadow-lg"
+                  className={`h-11 w-11 drop-shadow-lg ${
+                    drag?.id === device.id && drag.moved ? "opacity-90" : ""
+                  }`}
                 />
                 <span className="max-w-full truncate rounded bg-slate-950/75 px-1.5 py-0.5 text-[11px] font-medium text-slate-100">
                   {device.name}

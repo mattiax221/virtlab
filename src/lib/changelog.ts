@@ -341,6 +341,13 @@ export const releases: ChangelogEntry[] = [
     detail:
       "Job LPR con PDU PRINT sulla topologia; Desktop → Printers; pulse sulla stampante.",
   },
+  {
+    sha: "pending",
+    date: "2026-10-28",
+    title: "RDP UX + drag + MIB Browser",
+    detail:
+      "Remote Desktop più chiaro, movimento griglia fluido, MIB Walk SNMP.",
+  },
 ];
 
 /**
@@ -460,8 +467,25 @@ export const todos: TodoItem[] = [
     id: "desktop-stubs-real",
     title: "Chiudere gli stub Desktop PT",
     detail:
-      "Firewall host fatto; restano MIB Browser (SNMP), IP Communicator, Dial-up modem.",
+      "Firewall + MIB Browser fatti; restano IP Communicator e Dial-up modem.",
     status: "doing",
+    epic: "desktop",
+    horizon: "now",
+  },
+  {
+    id: "rdp-ux-drag",
+    title: "Remote Desktop chiaro + drag griglia",
+    detail:
+      "RDP a due colonne con stati; sessione remota evidenziata; drag fluido con cavi che seguono.",
+    status: "done",
+    epic: "desktop",
+    horizon: "now",
+  },
+  {
+    id: "mib-browser",
+    title: "MIB Browser SNMP",
+    detail: "Walk OID (sysDescr, ifDescr, IP) su device raggiungibile.",
+    status: "done",
     epic: "desktop",
     horizon: "now",
   },
