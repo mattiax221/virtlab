@@ -6,11 +6,12 @@ import {
   buildDnsSimulation,
   buildHttpSimulation,
   buildPingSimulation,
+  buildPrintSimulation,
   type SimPacket,
 } from "@/lib/network/simulation";
 import type { Device, LabState } from "@/lib/network/types";
 
-type Proto = "ICMP" | "HTTP" | "DNS" | "DHCP";
+type Proto = "ICMP" | "HTTP" | "DNS" | "DHCP" | "PRINT";
 
 /**
  * Desktop Traffic Generator (Packet Tracer style).
@@ -58,6 +59,8 @@ export function TrafficGenerator({
       built = buildHttpSimulation(state, live.id, dest.trim() || dnsName);
     } else if (proto === "DNS") {
       built = buildDnsSimulation(state, live.id, dnsName.trim());
+    } else if (proto === "PRINT") {
+      built = buildPrintSimulation(state, live.id, dest.trim());
     } else {
       built = buildDhcpSimulation(state, live.id);
     }
@@ -98,6 +101,7 @@ export function TrafficGenerator({
             <option value="ICMP">ICMP (Ping)</option>
             <option value="HTTP">HTTP</option>
             <option value="DNS">DNS</option>
+            <option value="PRINT">PRINT (LPR)</option>
             <option value="DHCP">DHCP</option>
           </select>
         </label>

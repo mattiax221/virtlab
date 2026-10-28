@@ -67,25 +67,58 @@ export function SimOverlay({
           ? "#a78bfa"
           : packet.kind === "HTTP"
             ? "#fb923c"
-            : packet.ok
-              ? "#34d399"
-              : "#f87171";
+            : packet.kind === "PRINT"
+              ? "#e879f9"
+              : packet.ok
+                ? "#34d399"
+                : "#f87171";
+
+  const atPrinter =
+    packet.kind === "PRINT" &&
+    packet.label.startsWith("LPR") &&
+    t > 0.85 &&
+    hop >= packet.hops.length - 2;
 
   return (
     <div className="pointer-events-none absolute inset-0 z-20">
+      {/* traccia del percorso */}
+      {packet.hops.length >= 2 && (
+        <svg className="absolute inset-0 h-full w-full overflow-visible">
+          <polyline
+            fill="none"
+            stroke={color}
+            strokeOpacity={0.35}
+            strokeWidth={2}
+            strokeDasharray="6 4"
+            points={packet.hops.map((h) => `${h.x},${h.y}`).join(" ")}
+          />
+        </svg>
+      )}
       <div
-        className="absolute -translate-x-1/2 -translate-y-1/2 rounded-full border-2 px-2 py-0.5 text-[10px] font-bold shadow-lg"
+        className="absolute -translate-x-1/2 -translate-y-1/2 rounded-full border-2 px-2.5 py-1 text-[10px] font-bold shadow-lg"
         style={{
           left: x,
           top: y,
           borderColor: color,
           background: "#0f172aee",
           color,
+          boxShadow: `0 0 16px ${color}66`,
         }}
       >
-        {packet.kind}
+        {packet.kind === "PRINT" ? "🖨 PRINT" : packet.kind}
       </div>
-      <div className="absolute left-1/2 top-3 max-w-md -translate-x-1/2 rounded-full border border-slate-600 bg-slate-950/90 px-4 py-1.5 text-center text-xs text-slate-200">
+      {atPrinter && packet.toDeviceId && (
+        <div
+          className="absolute -translate-x-1/2 animate-pulse rounded-md border-2 border-fuchsia-400 bg-fuchsia-950/90 px-2 py-1 text-[10px] font-semibold text-fuchsia-100"
+          style={{
+            left: packet.hops[packet.hops.length - 1]?.x,
+            top: (packet.hops[packet.hops.length - 1]?.y ?? 0) + 28,
+          }}
+        >
+          Stampa in corso…
+        </div>
+      )}
+      <div className="absolute left-1/2 top-3 max-w-lg -translate-x-1/2 rounded-full border border-slate-600 bg-slate-950/90 px-4 py-1.5 text-center text-xs text-slate-200">
         Simulation: {packet.label} — {packet.detail}
       </div>
     </div>

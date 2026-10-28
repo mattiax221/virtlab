@@ -1,5 +1,6 @@
 import { getDevice } from "./engine-helpers";
 import { isValidIp } from "./ip";
+import { sendPrintJob } from "./print";
 import {
   resolveDnsName,
   resolveDnsQuery,
@@ -11,7 +12,7 @@ import type { LabState, PingHop } from "./types";
 
 export type SimPacket = {
   id: string;
-  kind: "ICMP" | "ARP" | "DHCP" | "DNS" | "HTTP";
+  kind: "ICMP" | "ARP" | "DHCP" | "DNS" | "HTTP" | "PRINT";
   label: string;
   fromDeviceId: string;
   toDeviceId: string | null;
@@ -316,6 +317,82 @@ export function buildHttpSimulation(
   };
 }
 
+/** Stampa remota PC → Printer-PT con PDU animati sulla griglia. */
+export function buildPrintSimulation(
+  state: LabState,
+  fromDeviceId: string,
+  target: string,
+): { packets: SimPacket[]; state: LabState; message: string } {
+  const packets: SimPacket[] = [];
+  let dest = target;
+  let next = state;
+
+  if (!isValidIp(dest)) {
+    const dns = buildDnsSimulation(state, fromDeviceId, dest);
+    packets.push(...dns.packets);
+    const resolved = resolveDnsName(dns.state, fromDeviceId, dest);
+    if (!resolved) {
+      return { packets, state: dns.state, message: dns.message };
+    }
+    dest = resolved;
+    next = dns.state;
+  }
+
+  const printed = sendPrintJob(next, fromDeviceId, dest);
+  next = printed.state;
+
+  const { result } = runPing(state, fromDeviceId, dest);
+  // Prefer hops from a fresh reachability path on the post-print topology
+  const reach = runPing(next, fromDeviceId, dest);
+  const path = hopsToPath(next, reach.result.hops.length ? reach.result.hops : result.hops);
+  const printerId =
+    printed.printerId ?? path[path.length - 1]?.deviceId ?? null;
+
+  if (path.length >= 2) {
+    packets.push({
+      id: `arp-print-${Date.now()}`,
+      kind: "ARP",
+      label: "ARP",
+      fromDeviceId,
+      toDeviceId: path[1]?.deviceId ?? null,
+      hops: path.slice(0, 2),
+      hopIndex: 0,
+      ok: printed.ok,
+      detail: `ARP for ${dest}`,
+    });
+  }
+
+  packets.push({
+    id: `print-job-${Date.now()}`,
+    kind: "PRINT",
+    label: "LPR / Print Job",
+    fromDeviceId,
+    toDeviceId: printerId,
+    hops: path.length >= 2 ? path : devicePoint(next, fromDeviceId),
+    hopIndex: 0,
+    ok: printed.ok,
+    detail: printed.ok
+      ? `Job ${printed.job?.id ?? ""} → ${printed.job?.pages ?? "?"} pg @ ${dest}`
+      : printed.message.split("\n")[0],
+  });
+
+  if (printed.ok && path.length >= 2) {
+    packets.push({
+      id: `print-ack-${Date.now()}`,
+      kind: "PRINT",
+      label: "Print ACK",
+      fromDeviceId: printerId ?? fromDeviceId,
+      toDeviceId: fromDeviceId,
+      hops: [...path].reverse(),
+      hopIndex: 0,
+      ok: true,
+      detail: `ACK coda ${getDevice(next, printerId ?? "")?.name ?? "printer"}`,
+    });
+  }
+
+  return { packets, state: next, message: printed.message };
+}
+
 /** Auto-pick simulation protocol based on destination device/services. */
 export function buildAutoSimulation(
   state: LabState,
@@ -326,6 +403,18 @@ export function buildAutoSimulation(
   const from = getDevice(state, fromDeviceId);
   if (!to || !from) {
     return { packets: [], state, message: "Dispositivo non trovato" };
+  }
+
+  if (to.type === "printer") {
+    const ip = to.interfaces.find((i) => i.ip)?.ip;
+    if (!ip) {
+      return {
+        packets: [],
+        state,
+        message: `${to.name}: configura un IP (Config → Static/DHCP) prima di stampare.`,
+      };
+    }
+    return buildPrintSimulation(state, fromDeviceId, ip);
   }
 
   if (to.services?.http?.enabled) {

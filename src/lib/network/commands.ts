@@ -22,6 +22,7 @@ import {
   resolveDnsQuery,
 } from "./services";
 import { authenticateAaa } from "./aaa";
+import { sendPrintJob } from "./print";
 import { syncNtp } from "./telemetry";
 import {
   getHostOs,
@@ -875,62 +876,9 @@ export function runPcCommand(
 }
 
 function submitPrintJob(ctx: CommandContext, target: string): CommandResult {
-  let ip = target;
-  let state = ctx.state;
-  if (!/^\d+\.\d+\.\d+\.\d+$/.test(target)) {
-    const q = resolveDnsQuery(state, ctx.deviceId, target);
-    state = q.state;
-    if (!q.ip) return { output: `print: impossibile risolvere ${target}` };
-    ip = q.ip;
-  }
-  const { result, state: afterPing } = runPing(state, ctx.deviceId, ip);
-  ctx.setState(afterPing);
-  if (!result.ok) {
-    return {
-      output: `print: ${ip} non raggiungibile\n${result.message.split("\n")[0]}`,
-    };
-  }
-  const printer = afterPing.devices.find(
-    (d) =>
-      d.type === "printer" &&
-      d.interfaces.some((i) => i.ip === ip),
-  );
-  if (!printer) {
-    return { output: `print: nessun Printer-PT su ${ip}` };
-  }
-  if (!printer.powered) {
-    return { output: `print: ${printer.name} è spenta` };
-  }
-  const svc = printer.printerService ?? {
-    enabled: true,
-    shareName: printer.name,
-    queue: [],
-  };
-  if (!svc.enabled) {
-    return { output: `print: servizio PRINT disabilitato su ${printer.name}` };
-  }
-  const from = getDevice(afterPing, ctx.deviceId);
-  const job = {
-    id: `job-${Date.now().toString(36)}`,
-    from: from?.name ?? ctx.deviceId,
-    pages: 1 + Math.floor(Math.random() * 3),
-    status: "done" as const,
-    at: new Date().toLocaleTimeString("it-IT", { timeZone: "Europe/Rome" }),
-  };
-  const next = updateDevice(afterPing, printer.id, {
-    printerService: {
-      ...svc,
-      queue: [job, ...svc.queue].slice(0, 30),
-    },
-  });
-  ctx.setState(next);
-  return {
-    output: [
-      `Submitting job to \\\\${printer.name}\\${svc.shareName} (${ip})…`,
-      `Job ${job.id} — ${job.pages} page(s) — ${job.status}`,
-      `(coda stampante aggiornata)`,
-    ].join("\n"),
-  };
+  const res = sendPrintJob(ctx.state, ctx.deviceId, target);
+  ctx.setState(res.state);
+  return { output: res.message };
 }
 
 function startFtpSession(ctx: CommandContext, target: string): CommandResult {

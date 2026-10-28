@@ -25,12 +25,16 @@ import {
   type HostOs,
   type LabState,
 } from "@/lib/network/types";
-import type { SimPacket } from "@/lib/network/simulation";
+import {
+  buildPrintSimulation,
+  type SimPacket,
+} from "@/lib/network/simulation";
 import { EmailClient } from "./EmailClient";
 import { HostFirewallPanel } from "./HostFirewall";
 import { NetworkConnections } from "./NetworkConnections";
 import { PhysicalPanel } from "./PhysicalPanel";
 import { PppoeDialer } from "./PppoeDialer";
+import { PrintClient } from "./PrintClient";
 import { RemoteDesktop } from "./RemoteDesktop";
 import { ServerServices } from "./ServerServices";
 import { Terminal } from "./Terminal";
@@ -56,6 +60,7 @@ type AppId =
   | "voip"
   | "rdp"
   | "ssh"
+  | "print"
   | "physical"
   | "services"
   | "stub"
@@ -74,6 +79,7 @@ type IconKind =
   | "editor"
   | "rdp"
   | "ssh"
+  | "print"
   | "firewall"
   | "mib"
   | "voip"
@@ -101,6 +107,7 @@ const SHORTCUTS_WIN: Shortcut[] = [
   { id: "email", label: "Email", icon: "email" },
   { id: "pppoe", label: "PPPoE Dialer", icon: "pppoe" },
   { id: "editor", label: "Text Editor", icon: "editor" },
+  { id: "print", label: "Printers", icon: "print" },
   { id: "rdp", label: "Remote Desktop", icon: "rdp" },
   { id: "ssh", label: "Telnet / SSH", icon: "ssh" },
   { id: "firewall", label: "Firewall", icon: "firewall" },
@@ -120,6 +127,7 @@ const SHORTCUTS_LINUX: Shortcut[] = [
   { id: "email", label: "Email", icon: "email" },
   { id: "pppoe", label: "PPPoE Dialer", icon: "pppoe" },
   { id: "editor", label: "Text Editor", icon: "editor" },
+  { id: "print", label: "Printers", icon: "print" },
   { id: "rdp", label: "Remote Desktop", icon: "rdp" },
   { id: "ssh", label: "Telnet / SSH", icon: "ssh" },
   { id: "firewall", label: "Firewall", icon: "firewall" },
@@ -383,7 +391,7 @@ export function WindowsDesktop({
                               `Welcome to bash — digita help · Tab = completa.`,
                               ``,
                               `Host: ${live.name} · IP: ${eth?.ip ?? "(n/d)"}`,
-                              `ip addr | dhclient | ping | dig | curl | ftp`,
+                              `ip addr | dhclient | ping | dig | curl | lpr`,
                               ``,
                             ]
                           : [
@@ -391,7 +399,7 @@ export function WindowsDesktop({
                               `(c) NetLab — ${app === "terminal" ? "Terminal" : "CMD"} · Tab = completa.`,
                               ``,
                               `Host: ${live.name} · IP: ${eth?.ip ?? "(n/d)"}`,
-                              `help | ipconfig | ping | nslookup | ftp | ntp sync`,
+                              `help | ipconfig | ping | print | ftp | ntp sync`,
                               ``,
                             ]
                       }
@@ -402,10 +410,51 @@ export function WindowsDesktop({
                             ? PC_LINUX_COMPLETIONS
                             : PC_WIN_COMPLETIONS
                       }
-                      onCommand={(line) => runPcCommand(line, makeCtx())}
+                      onCommand={(line) => {
+                        const trimmed = line.trim();
+                        const lower = trimmed.toLowerCase();
+                        if (
+                          lower.startsWith("print ") ||
+                          lower.startsWith("lpr ")
+                        ) {
+                          const target = trimmed.split(/\s+/)[1];
+                          if (!target) {
+                            return {
+                              output: isLinux
+                                ? "Uso: lpr <host|ip>"
+                                : "Uso: print <host|ip>",
+                            };
+                          }
+                          const built = buildPrintSimulation(
+                            stateRef.current,
+                            device.id,
+                            target,
+                          );
+                          stateRef.current = built.state;
+                          setState(built.state);
+                          if (built.packets.length) {
+                            onSimulate?.(built.packets, built.message);
+                            window.setTimeout(() => onClose(), 350);
+                          }
+                          return { output: built.message };
+                        }
+                        return runPcCommand(line, makeCtx());
+                      }}
                     />
                   </div>
                 </>
+              )}
+              {app === "print" && (
+                <PrintClient
+                  device={device}
+                  stateRef={stateRef}
+                  setState={setState}
+                  onClose={() => setApp(null)}
+                  onPrint={(packets, message) => {
+                    onSimulate?.(packets, message);
+                    window.setTimeout(() => onClose(), 350);
+                  }}
+                />
               )}
               {app === "ssh" && (
                 <SshClientPanel
@@ -437,6 +486,9 @@ export function WindowsDesktop({
                   onClose={() => setApp(null)}
                   onGenerate={(packets, message) => {
                     onSimulate?.(packets, message);
+                    if (packets.some((p) => p.kind === "PRINT")) {
+                      window.setTimeout(() => onClose(), 350);
+                    }
                   }}
                 />
               )}
@@ -712,6 +764,15 @@ function DesktopGlyph({ kind }: { kind: IconKind }) {
             fill="#d9e2ec"
           />
           <path d="M31 28v-2a3 3 0 016 0v2" />
+        </svg>
+      );
+    case "print":
+      return (
+        <svg {...common}>
+          <rect x="14" y="8" width="20" height="10" rx="1" fill="#f4f8fc" />
+          <rect x="10" y="18" width="28" height="14" rx="2" fill="#94a3b8" />
+          <rect x="14" y="32" width="20" height="10" rx="1" fill="#f4f8fc" />
+          <circle cx="34" cy="25" r="2" fill="#22c55e" stroke="none" />
         </svg>
       );
     case "firewall":

@@ -486,6 +486,15 @@ export const todos: TodoItem[] = [
     horizon: "now",
   },
   {
+    id: "print-sim-anim",
+    title: "Stampa remota animata sulla griglia",
+    detail:
+      "PDU PRINT magenta PC→stampante, shortcut Printers, Traffic Generator LPR.",
+    status: "done",
+    epic: "l2l3",
+    horizon: "now",
+  },
+  {
     id: "ssh-real-cli",
     title: "Telnet/SSH → CLI del device remoto",
     detail:

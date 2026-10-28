@@ -1188,39 +1188,59 @@ export function LabWorkspace() {
             </div>
           )}
 
-          {state.devices.map((device) => (
-            <button
-              key={device.id}
-              type="button"
-              className={`absolute flex w-[5.5rem] -translate-x-1/2 -translate-y-1/2 flex-col items-center gap-0.5 rounded-lg p-1.5 transition ${
-                selectedId === device.id ||
-                cableDraft?.fromDeviceId === device.id ||
-                cableDraft?.toDeviceId === device.id ||
-                simFrom === device.id
-                  ? "bg-sky-500/20 ring-2 ring-sky-400"
-                  : "hover:bg-white/5"
-              }`}
-              style={{ left: device.x, top: device.y }}
-              onPointerDown={(e) => onDevicePointerDown(e, device)}
-              onDoubleClick={(e) => {
-                e.stopPropagation();
-                openDeviceUi(device);
-              }}
-              onContextMenu={(e) =>
-                openContext(e, { kind: "device", id: device.id })
-              }
-            >
-              <DeviceIcon type={device.type} className="h-11 w-11 drop-shadow-lg" />
-              <span className="max-w-full truncate rounded bg-slate-950/75 px-1.5 py-0.5 text-[11px] font-medium text-slate-100">
-                {device.name}
-              </span>
-              {device.interfaces[0]?.ip && isEndHost(device.type) && (
-                <span className="text-[10px] text-sky-300/90">
-                  {device.interfaces[0].ip}
+          {state.devices.map((device) => {
+            const printBusy =
+              !!simPackets?.some(
+                (p) =>
+                  p.kind === "PRINT" &&
+                  (p.toDeviceId === device.id ||
+                    p.fromDeviceId === device.id ||
+                    p.hops.some((h) => h.deviceId === device.id)),
+              ) && device.type === "printer";
+            return (
+              <button
+                key={device.id}
+                type="button"
+                className={`absolute flex w-[5.5rem] -translate-x-1/2 -translate-y-1/2 flex-col items-center gap-0.5 rounded-lg p-1.5 transition ${
+                  printBusy
+                    ? "bg-fuchsia-500/25 ring-2 ring-fuchsia-400 animate-pulse"
+                    : selectedId === device.id ||
+                        cableDraft?.fromDeviceId === device.id ||
+                        cableDraft?.toDeviceId === device.id ||
+                        simFrom === device.id
+                      ? "bg-sky-500/20 ring-2 ring-sky-400"
+                      : "hover:bg-white/5"
+                }`}
+                style={{ left: device.x, top: device.y }}
+                onPointerDown={(e) => onDevicePointerDown(e, device)}
+                onDoubleClick={(e) => {
+                  e.stopPropagation();
+                  openDeviceUi(device);
+                }}
+                onContextMenu={(e) =>
+                  openContext(e, { kind: "device", id: device.id })
+                }
+              >
+                <DeviceIcon
+                  type={device.type}
+                  className="h-11 w-11 drop-shadow-lg"
+                />
+                <span className="max-w-full truncate rounded bg-slate-950/75 px-1.5 py-0.5 text-[11px] font-medium text-slate-100">
+                  {device.name}
                 </span>
-              )}
-            </button>
-          ))}
+                {device.interfaces[0]?.ip && isEndHost(device.type) && (
+                  <span className="text-[10px] text-sky-300/90">
+                    {device.interfaces[0].ip}
+                  </span>
+                )}
+                {printBusy && (
+                  <span className="rounded bg-fuchsia-600/90 px-1 text-[9px] font-bold text-white">
+                    PRINT
+                  </span>
+                )}
+              </button>
+            );
+          })}
 
           {inspectDevice && (
             <div
