@@ -347,6 +347,13 @@ export const releases: ChangelogEntry[] = [
     detail:
       "Remote Desktop più chiaro, movimento griglia fluido, MIB Walk SNMP.",
   },
+  {
+    sha: "4537292",
+    date: "2026-10-28",
+    title: "Changelog pubblico + prep GitHub/Vercel",
+    detail:
+      "Tolte note interne dalla pagina Changelog; workflow: GitHub pubblico → Vercel → /changelog.",
+  },
 ];
 
 /** Roadmap NetLab — Packet Tracer didattico nel browser. */
@@ -452,10 +459,10 @@ export const todos: TodoItem[] = [
   // —— Subito ——
   {
     id: "deploy-virt-lab",
-    title: "Pubblicare su Vercel (virt-lab live)",
+    title: "GitHub pubblico + Vercel",
     detail:
-      "Sbloccare push su aasda-add/virt-lab e ridistribuire virt-lab-wheat.vercel.app — oggi il lab “vero” resta indietro.",
-    status: "todo",
+      "Repo pubblico su GitHub, deploy Vercel, ogni update su GitHub + Vercel + /changelog.",
+    status: "doing",
     epic: "ship",
     horizon: "now",
   },
