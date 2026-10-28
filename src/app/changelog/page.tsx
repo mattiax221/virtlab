@@ -1,5 +1,12 @@
 import Link from "next/link";
-import { latestRelease, releases, todos } from "@/lib/changelog";
+import {
+  EPIC_LABELS,
+  HORIZON_LABELS,
+  latestRelease,
+  releases,
+  todos,
+  type TodoItem,
+} from "@/lib/changelog";
 
 const statusLabel = {
   todo: "Da fare",
@@ -15,13 +22,37 @@ const statusClass = {
 
 export const metadata = {
   title: "Changelog — NetLab",
-  description: "Cronologia delle versioni NetLab e elenco cose da fare.",
+  description: "Cronologia delle versioni NetLab e roadmap ambiziosa.",
 };
+
+function TodoCard({ t }: { t: TodoItem }) {
+  return (
+    <li className="rounded-lg border border-slate-700/80 bg-slate-900/50 p-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <span
+          className={`rounded border px-2 py-0.5 text-[11px] font-medium ${statusClass[t.status]}`}
+        >
+          {statusLabel[t.status]}
+        </span>
+        {t.epic && (
+          <span className="rounded border border-slate-600/60 px-2 py-0.5 text-[10px] text-slate-400">
+            {EPIC_LABELS[t.epic]}
+          </span>
+        )}
+        <h3 className="text-sm font-semibold text-slate-100">{t.title}</h3>
+      </div>
+      <p className="mt-2 text-sm leading-relaxed text-slate-400">{t.detail}</p>
+    </li>
+  );
+}
 
 export default function ChangelogPage() {
   const latest = latestRelease();
   const openTodos = todos.filter((t) => t.status !== "done");
   const doneTodos = todos.filter((t) => t.status === "done");
+  const now = openTodos.filter((t) => (t.horizon ?? "next") === "now");
+  const next = openTodos.filter((t) => t.horizon === "next");
+  const vision = openTodos.filter((t) => t.horizon === "vision");
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-[#07111f] text-slate-100">
@@ -52,42 +83,47 @@ export default function ChangelogPage() {
           Changelog
         </h1>
         <p className="mt-3 max-w-2xl text-base leading-relaxed text-slate-400">
-          Storia dal primo commit all’ultimo, in italiano. Ultima release:{" "}
+          Storia dal primo commit e roadmap ambiziosa: da lab Packet
+          Tracer–like a piattaforma didattica completa. Ultima release:{" "}
           <span className="font-mono text-sky-300">{latest.sha}</span> —{" "}
           {latest.title} ({formatDateIt(latest.date)}).
         </p>
 
         <section className="mt-12">
           <h2 className="font-display text-2xl font-semibold text-white">
-            Cose da fare
+            Roadmap
           </h2>
           <p className="mt-2 text-sm text-slate-400">
-            Roadmap aperta ({openTodos.length} aperte
-            {doneTodos.length ? `, ${doneTodos.length} fatte` : ""}). Si
-            aggiorna insieme al lab.
+            {openTodos.length} aperti · {doneTodos.length} già in lab · pensata
+            “in grande” (CCNA, classroom, IoT, cyber).
           </p>
-          <ul className="mt-5 space-y-3">
-            {todos.map((t) => (
-              <li
-                key={t.id}
-                className="rounded-lg border border-slate-700/80 bg-slate-900/50 p-4"
-              >
-                <div className="flex flex-wrap items-center gap-2">
-                  <span
-                    className={`rounded border px-2 py-0.5 text-[11px] font-medium ${statusClass[t.status]}`}
-                  >
-                    {statusLabel[t.status]}
-                  </span>
-                  <h3 className="text-sm font-semibold text-slate-100">
-                    {t.title}
-                  </h3>
-                </div>
-                <p className="mt-2 text-sm leading-relaxed text-slate-400">
-                  {t.detail}
-                </p>
-              </li>
-            ))}
-          </ul>
+
+          <HorizonBlock
+            title={HORIZON_LABELS.now}
+            subtitle="Sblocchi e pezzi che chiudono il gap con PT Desktop/Services."
+            items={now}
+          />
+          <HorizonBlock
+            title={HORIZON_LABELS.next}
+            subtitle="Motore di rete e didattica da curriculum (routing dinamico, NAT, activity)."
+            items={next}
+          />
+          <HorizonBlock
+            title={HORIZON_LABELS.vision}
+            subtitle="Dove NetLab può arrivare: classi, import .pkt, IoT, CyberOps, tutor AI."
+            items={vision}
+          />
+
+          <details className="mt-10 rounded-xl border border-slate-800 bg-slate-950/40 p-4">
+            <summary className="cursor-pointer text-sm font-semibold text-slate-300">
+              Già fatto ({doneTodos.length})
+            </summary>
+            <ul className="mt-4 space-y-3">
+              {doneTodos.map((t) => (
+                <TodoCard key={t.id} t={t} />
+              ))}
+            </ul>
+          </details>
         </section>
 
         <section className="mt-14">
@@ -137,12 +173,33 @@ export default function ChangelogPage() {
         </section>
 
         <p className="mt-12 border-t border-slate-800 pt-6 text-xs text-slate-500">
-          Per aggiornare questa pagina: modifica{" "}
-          <code className="text-slate-400">src/lib/changelog.ts</code> (appendi
-          in <code className="text-slate-400">releases</code> e aggiorna{" "}
-          <code className="text-slate-400">todos</code>).
+          Aggiorna roadmap e release in{" "}
+          <code className="text-slate-400">src/lib/changelog.ts</code>.
         </p>
       </div>
+    </div>
+  );
+}
+
+function HorizonBlock({
+  title,
+  subtitle,
+  items,
+}: {
+  title: string;
+  subtitle: string;
+  items: TodoItem[];
+}) {
+  if (items.length === 0) return null;
+  return (
+    <div className="mt-8">
+      <h3 className="text-lg font-semibold text-sky-200">{title}</h3>
+      <p className="mt-1 text-sm text-slate-500">{subtitle}</p>
+      <ul className="mt-4 space-y-3">
+        {items.map((t) => (
+          <TodoCard key={t.id} t={t} />
+        ))}
+      </ul>
     </div>
   );
 }

@@ -19,7 +19,38 @@ export type TodoItem = {
   title: string;
   detail: string;
   status: "todo" | "doing" | "done";
+  /** Epic / area (per raggruppare la roadmap “pensa in grande”) */
+  epic?:
+    | "ship"
+    | "desktop"
+    | "services"
+    | "l2l3"
+    | "wan"
+    | "security"
+    | "iot"
+    | "pedagogy"
+    | "platform";
+  /** Orizzonte: ora / prossimo / visione */
+  horizon?: "now" | "next" | "vision";
 };
+
+export const EPIC_LABELS: Record<NonNullable<TodoItem["epic"]>, string> = {
+  ship: "Rilascio & distribuzione",
+  desktop: "Desktop end-device (PT)",
+  services: "Server Services",
+  l2l3: "Switching & Routing",
+  wan: "WAN / Accesso remoto",
+  security: "Sicurezza",
+  iot: "IoT & monitoring",
+  pedagogy: "Didattica & esercizi",
+  platform: "Piattaforma NetLab",
+};
+
+export const HORIZON_LABELS = {
+  now: "Subito",
+  next: "Prossimo traguardo",
+  vision: "Visione (pensa in grande)",
+} as const;
 
 /** Dal primo commit all’ultimo (ordine cronologico). */
 export const releases: ChangelogEntry[] = [
@@ -262,88 +293,326 @@ export const releases: ChangelogEntry[] = [
     detail:
       "Griglia shortcut stile Packet Tracer (niente «Questo PC»); Remote Desktop verso altri PC/Server; stub per MIB/Firewall/VoIP.",
   },
+  {
+    sha: "42be714",
+    date: "2026-10-28",
+    title: "Icone Desktop unificate",
+    detail: "SVG coerenti e tipografia più leggibile sulla griglia shortcut.",
+  },
+  {
+    sha: "pending",
+    date: "2026-10-28",
+    title: "Roadmap ambiziosa (pensa in grande)",
+    detail:
+      "Todo list ripensata: Subito / Prossimo / Visione (OSPF, classroom, IoT, CyberOps, tutor AI, tracce CCNA).",
+  },
 ];
 
-/** Roadmap / cose da fare (aggiornare quando si completa un item). */
+/**
+ * Roadmap NetLab — pensata come Packet Tracer didattico nel browser.
+ * Aggiornare status/horizon quando si completa o si riprioritizza.
+ */
 export const todos: TodoItem[] = [
+  // —— Completato (base già in lab) ——
   {
     id: "traffic-generator",
     title: "Traffic Generator / PDU dal Desktop",
-    detail:
-      "Utility Desktop PT: ICMP/HTTP/DNS/DHCP con animazione PDU sul canvas.",
+    detail: "ICMP/HTTP/DNS/DHCP con animazione sul canvas.",
     status: "done",
+    epic: "desktop",
+    horizon: "now",
   },
   {
     id: "ftp-interactive",
-    title: "FTP interattivo (login + get/put)",
-    detail:
-      "Sessione FTP: user/pass/dir/get/delete/bye (account default cisco/cisco).",
+    title: "FTP interattivo",
+    detail: "user/pass/dir/get/delete/bye verso Server-PT.",
     status: "done",
+    epic: "desktop",
+    horizon: "now",
   },
   {
     id: "dns-cache-ttl",
     title: "DNS cache con TTL",
-    detail: "Cache sul Server-PT aggiornata da query (TTL 300s), visibile in Services → DNS.",
+    detail: "Cache Server-PT (TTL 300s) da query/nslookup.",
     status: "done",
+    epic: "services",
+    horizon: "now",
   },
   {
     id: "syslog-ingest",
     title: "SYSLOG da eventi di rete",
-    detail: "Link-up e power on/off scrivono sul Server-PT SYSLOG.",
+    detail: "Link-up e power on/off → Server-PT SYSLOG.",
     status: "done",
+    epic: "services",
+    horizon: "now",
   },
   {
     id: "ntp-sync",
-    title: "Sincronizzazione NTP sui host",
-    detail: "Comando `ntp sync` / `w32tm /resync` aggiorna orologio desktop dal Server-PT.",
+    title: "NTP sync host/router",
+    detail: "`ntp sync` / `w32tm /resync` dal Server-PT.",
     status: "done",
+    epic: "services",
+    horizon: "now",
   },
   {
     id: "email-client",
-    title: "Client EMAIL sul Desktop",
-    detail:
-      "Inbox/compose SMTP+POP3 (utenti admin/studente @ lab.local, password cisco).",
+    title: "Client EMAIL Desktop",
+    detail: "SMTP/POP3 admin & studente @ lab.local.",
     status: "done",
+    epic: "desktop",
+    horizon: "now",
   },
   {
     id: "tftp-flash",
-    title: "TFTP flash IOS (simulato)",
-    detail:
-      "Router: `copy tftp flash <ip> <file>` e `show flash` dalle immagini TFTP del Server-PT.",
+    title: "TFTP flash IOS",
+    detail: "`copy tftp flash` + `show flash` sui router.",
     status: "done",
+    epic: "services",
+    horizon: "now",
   },
   {
     id: "aaa-auth",
-    title: "AAA su login CLI router",
-    detail:
-      "`aaa new-model` + `radius-server host` + enable chiede user/pass verso Server-PT AAA.",
+    title: "AAA su enable router",
+    detail: "RADIUS verso Server-PT per privilege mode.",
     status: "done",
+    epic: "security",
+    horizon: "now",
   },
   {
     id: "stp-unicast",
-    title: "STP e MAC unicast più fedeli",
-    detail:
-      "STP semplificato su loop switch↔switch; unicast se MAC in tabella; `show spanning-tree`.",
+    title: "STP + MAC unicast (v1)",
+    detail: "Loop switch, porte BLK, unicast se MAC noto.",
     status: "done",
+    epic: "l2l3",
+    horizon: "now",
   },
   {
     id: "vpn-pppoe",
-    title: "PPPoE Dialer e VPN Desktop",
-    detail: "Utility Desktop PPPoE e VPN (Connect/Disconnect, IP virtuale).",
+    title: "PPPoE + VPN Desktop",
+    detail: "Dialer e tunnel con IP virtuale.",
     status: "done",
+    epic: "wan",
+    horizon: "now",
   },
   {
-    id: "mobile-polish",
-    title: "Usabilità touch / schermi piccoli",
-    detail: "Header wrap, target più grandi, desktop a schermo intero su mobile.",
+    id: "desktop-pt-grid",
+    title: "Desktop shortcut stile PT + RDP",
+    detail: "Griglia icone unificate, Remote Desktop, stub PT.",
     status: "done",
+    epic: "desktop",
+    horizon: "now",
   },
+  {
+    id: "esercizi-page",
+    title: "Pagina esercizi dedicata",
+    detail: "/esercizi con checklist da autosave.",
+    status: "done",
+    epic: "pedagogy",
+    horizon: "now",
+  },
+
+  // —— Subito ——
   {
     id: "deploy-virt-lab",
-    title: "Sync su virt-lab + deploy Vercel",
+    title: "Pubblicare su Vercel (virt-lab live)",
     detail:
-      "Far arrivare main aggiornato su aasda-add/virt-lab e ridistribuire virt-lab-wheat.vercel.app (cloud agent: 403 sul push).",
+      "Sbloccare push su aasda-add/virt-lab e ridistribuire virt-lab-wheat.vercel.app — oggi il lab “vero” resta indietro.",
     status: "todo",
+    epic: "ship",
+    horizon: "now",
+  },
+  {
+    id: "desktop-stubs-real",
+    title: "Chiudere gli stub Desktop PT",
+    detail:
+      "Firewall IPv4/IPv6 host ACL, MIB Browser (SNMP get/walk), Cisco IP Communicator (softphone base), Dial-up modem.",
+    status: "todo",
+    epic: "desktop",
+    horizon: "now",
+  },
+  {
+    id: "ssh-real-cli",
+    title: "Telnet/SSH → CLI del device remoto",
+    detail:
+      "Dal client Desktop aprire davvero la console router/switch (non solo ping di raggiungibilità).",
+    status: "todo",
+    epic: "desktop",
+    horizon: "now",
+  },
+
+  // —— Prossimo traguardo ——
+  {
+    id: "server-tabs-pt",
+    title: "Finestra Server = Physical | Config | Services | Desktop",
+    detail:
+      "Come in PT: tab unificate, Programming/Attributes opzionali; Services con DHCPv6, IoT, VM Management, Radius EAP, PRP.",
+    status: "todo",
+    epic: "services",
+    horizon: "next",
+  },
+  {
+    id: "complex-pdu",
+    title: "Add Complex PDU + PDU list",
+    detail:
+      "Editor pacchetti (L2–L4), coda PDU, cattura tipo Simulation Mode avanzata con hop-by-hop e fail reason.",
+    status: "todo",
+    epic: "l2l3",
+    horizon: "next",
+  },
+  {
+    id: "ospf-eigrp",
+    title: "Routing dinamico OSPF / EIGRP (lab)",
+    detail:
+      "Adiacenze, LSA semplificate, `show ip route ospf`, multi-area base — esercizi CCNA oltre lo statico.",
+    status: "todo",
+    epic: "l2l3",
+    horizon: "next",
+  },
+  {
+    id: "stp-rstp-full",
+    title: "STP/RSTP per-VLAN + PortFast/BPDU guard",
+    detail:
+      "Root election reale (priority+MAC), costi, `show spanning-tree detail`, topologie ad anello multi-switch.",
+    status: "todo",
+    epic: "l2l3",
+    horizon: "next",
+  },
+  {
+    id: "etherchannel-hsrp",
+    title: "EtherChannel + HSRP/VRRP",
+    detail:
+      "Lag tra switch e first-hop redundancy tra router — lab HA da curriculum.",
+    status: "todo",
+    epic: "l2l3",
+    horizon: "next",
+  },
+  {
+    id: "acl-firewall-host",
+    title: "Firewall Desktop + ACL estese",
+    detail:
+      "Regole IPv4/IPv6 sul PC; ACL numbered/named estese (TCP/UDP porte) su router; hit counters.",
+    status: "todo",
+    epic: "security",
+    horizon: "next",
+  },
+  {
+    id: "nat-pat",
+    title: "NAT / PAT sul bordo",
+    detail:
+      "`ip nat inside/outside`, pool, overload, `show ip nat translations` — lab Internet edge.",
+    status: "todo",
+    epic: "wan",
+    horizon: "next",
+  },
+  {
+    id: "dhcpv6-slaac",
+    title: "IPv6 first-class (SLAAC + DHCPv6)",
+    detail:
+      "Indirizzi link-local, RA, DHCPv6 sul Server-PT, ping6/tracert6, dual-stack UI.",
+    status: "todo",
+    epic: "services",
+    horizon: "next",
+  },
+  {
+    id: "wireless-enterprise",
+    title: "Wi‑Fi enterprise (WLC + CAPWAP)",
+    detail:
+      "Lightweight AP, controller, SSID multipli, 802.1X verso AAA — oltre WPA2 PSK.",
+    status: "todo",
+    epic: "wan",
+    horizon: "next",
+  },
+  {
+    id: "activity-wizard",
+    title: "Activity / Assessment mode",
+    detail:
+      "Esercizi con obiettivi, hint, punteggio automatico, export risultato studente (come PT Activity Wizard).",
+    status: "todo",
+    epic: "pedagogy",
+    horizon: "next",
+  },
+
+  // —— Visione (pensa in grande) ——
+  {
+    id: "netlab-classroom",
+    title: "NetLab Classroom (multi-utente)",
+    detail:
+      "Docente crea lab template; studenti clonano sandbox isolate; share link + sessione live opzionale; nessun account obbligatorio ma classi opzionali.",
+    status: "todo",
+    epic: "platform",
+    horizon: "vision",
+  },
+  {
+    id: "pkt-import",
+    title: "Import / export .pkt (o JSON PT-compat)",
+    detail:
+      "Apri topologie da Packet Tracer o esporta verso strumenti esterni; bridge con community curriculum.",
+    status: "todo",
+    epic: "platform",
+    horizon: "vision",
+  },
+  {
+    id: "full-ios-feel",
+    title: "IOS-like depth (switch L3 + router ISR)",
+    detail:
+      "SVI, routing on multilayer, VRF light, QoS marking base, SNMP trap → MIB Browser.",
+    status: "todo",
+    epic: "l2l3",
+    horizon: "vision",
+  },
+  {
+    id: "iot-stack",
+    title: "IoT Monitor / IoT IDE / Supervisory",
+    detail:
+      "Cose PT: sensori, MCU/SBC, home gateway, dashboard supervisory — lab smart building.",
+    status: "todo",
+    epic: "iot",
+    horizon: "vision",
+  },
+  {
+    id: "netflow-siem",
+    title: "NetFlow Collector + correlazione SYSLOG",
+    detail:
+      "Flussi esportati dai router, grafici top talkers, timeline incidenti per esercizi security.",
+    status: "todo",
+    epic: "iot",
+    horizon: "vision",
+  },
+  {
+    id: "cyberops-path",
+    title: "Percorso CyberOps / blue team",
+    detail:
+      "Scenario attacco simulato (scan, brute AAA, lateral) + detection su SYSLOG/NetFlow/ACL drop — senza malware reale.",
+    status: "todo",
+    epic: "security",
+    horizon: "vision",
+  },
+  {
+    id: "offline-pwa",
+    title: "PWA offline + installabile",
+    detail:
+      "Lab usabile senza rete (scuole), autosave robusto, sync quando torna la connessione.",
+    status: "todo",
+    epic: "platform",
+    horizon: "vision",
+  },
+  {
+    id: "ai-lab-tutor",
+    title: "Tutor AI nel lab (opzionale)",
+    detail:
+      "Spiega perché il ping fallisce (cavo, VLAN, rotta, ACL) citando lo stato reale del lab — mai bypassare la sim.",
+    status: "todo",
+    epic: "pedagogy",
+    horizon: "vision",
+  },
+  {
+    id: "cert-tracks",
+    title: "Tracce certificate (CCNA / Network+)",
+    detail:
+      "Percorsi guidati con lab progressivi, badge, e checklist allineate agli exam topic.",
+    status: "todo",
+    epic: "pedagogy",
+    horizon: "vision",
   },
 ];
 
