@@ -23,7 +23,9 @@ export function SimOverlay({
     }
     let raf = 0;
     let start = performance.now();
-    const hopDuration = 700;
+    // PRINT più lento (si vede PC→switch→stampante); altri protocolli restano snelli
+    const hopDuration = packet.kind === "PRINT" ? 1800 : 700;
+    const endPause = packet.kind === "PRINT" ? 2200 : 600;
     const tick = (now: number) => {
       const u = Math.min(1, (now - start) / hopDuration);
       setT(u);
@@ -40,7 +42,7 @@ export function SimOverlay({
           start = now;
           raf = requestAnimationFrame(tick);
         } else {
-          window.setTimeout(onDone, 600);
+          window.setTimeout(onDone, endPause);
         }
       } else {
         raf = requestAnimationFrame(tick);
@@ -75,9 +77,8 @@ export function SimOverlay({
 
   const atPrinter =
     packet.kind === "PRINT" &&
-    packet.label.startsWith("LPR") &&
-    t > 0.85 &&
-    hop >= packet.hops.length - 2;
+    hop >= Math.max(0, packet.hops.length - 2) &&
+    t > 0.55;
 
   return (
     <div className="pointer-events-none absolute inset-0 z-20">

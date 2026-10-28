@@ -365,22 +365,7 @@ export function buildPrintSimulation(
     path = hopsToPath(reach.state, reach.result.hops, { allowWireless });
   }
 
-  if (path.length >= 2) {
-    packets.push({
-      id: `arp-print-${Date.now()}`,
-      kind: "ARP",
-      label: "ARP",
-      fromDeviceId,
-      toDeviceId: path[1]?.deviceId ?? null,
-      hops: path.slice(0, 2),
-      hopIndex: 0,
-      ok: printed.ok,
-      detail: allowWireless
-        ? `ARP (Wi‑Fi) for ${dest}`
-        : `ARP via cavo → ${path[1]?.label ?? "peer"}`,
-    });
-  }
-
+  // Un solo PDU one-way lungo i cavi (niente ARP separato né ritorno).
   packets.push({
     id: `print-job-${Date.now()}`,
     kind: "PRINT",
@@ -395,20 +380,6 @@ export function buildPrintSimulation(
         (allowWireless ? " [Wi‑Fi]" : " [cablato]")
       : printed.message.split("\n")[0],
   });
-
-  if (printed.ok && path.length >= 2) {
-    packets.push({
-      id: `print-ack-${Date.now()}`,
-      kind: "PRINT",
-      label: "Print ACK",
-      fromDeviceId: printerId ?? fromDeviceId,
-      toDeviceId: fromDeviceId,
-      hops: [...path].reverse(),
-      hopIndex: 0,
-      ok: true,
-      detail: `ACK coda ${getDevice(next, printerId ?? "")?.name ?? "printer"}`,
-    });
-  }
 
   return { packets, state: next, message: printed.message };
 }
