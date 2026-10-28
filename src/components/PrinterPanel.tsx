@@ -348,11 +348,13 @@ export function PrinterPanel({
           )}
 
           {tab === "physical" && (
-            <PhysicalPanel
-              device={device}
-              stateRef={stateRef}
-              setState={setState}
-            />
+            <div className="-m-4 min-h-full">
+              <PhysicalPanel
+                device={device}
+                stateRef={stateRef}
+                setState={setState}
+              />
+            </div>
           )}
 
           {tab === "services" && (
