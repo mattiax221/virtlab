@@ -229,7 +229,7 @@ export const releases: ChangelogEntry[] = [
       "Pagina /changelog in italiano: cronologia dal primo commit e elenco cose da fare.",
   },
   {
-    sha: "pending",
+    sha: "8bb325d",
     date: "2026-10-28",
     title: "Traffic Generator, FTP, SYSLOG, NTP, DNS cache",
     detail:
