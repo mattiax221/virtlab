@@ -61,6 +61,7 @@ import { DeviceIcon } from "./DeviceIcon";
 import { PortPicker } from "./PortPicker";
 import { RouterConsole } from "./RouterConsole";
 import { SimOverlay } from "./SimOverlay";
+import { PrinterPanel } from "./PrinterPanel";
 import { SimpleDevicePanel } from "./SimpleDevicePanel";
 import { SwitchPanel } from "./SwitchPanel";
 import { WifiApPanel } from "./WifiApPanel";
@@ -74,7 +75,7 @@ type CableDraft = {
   fromIfaceId: string | null;
   toDeviceId: string | null;
 };
-type OpenMode = "sim" | "panel" | "switch" | "router" | "wifi";
+type OpenMode = "sim" | "panel" | "switch" | "router" | "wifi" | "printer";
 
 type CtxTarget =
   | { kind: "device"; id: string }
@@ -118,6 +119,9 @@ function modeFor(device: Device): OpenMode {
     device.type === "meraki_server"
   ) {
     return "sim";
+  }
+  if (device.type === "printer") {
+    return "printer";
   }
   return "panel";
 }
@@ -1463,6 +1467,14 @@ export function LabWorkspace() {
       )}
       {openDevice && openMode === "wifi" && (
         <WifiApPanel
+          device={openDevice}
+          stateRef={stateRef}
+          setState={setState}
+          onClose={closeOpen}
+        />
+      )}
+      {openDevice && openMode === "printer" && (
+        <PrinterPanel
           device={openDevice}
           stateRef={stateRef}
           setState={setState}

@@ -98,6 +98,20 @@ export function createDevice(
       eth0.dhcpClient = false;
     }
   }
+  if (type === "printer") {
+    device.printerService = {
+      enabled: true,
+      shareName: name.replace(/\s+/g, "_"),
+      location: "Lab",
+      paper: "A4",
+      queue: [],
+    };
+    // Nessun IP di default — si configura da Config (static/DHCP), come in PT
+    const eth0 = device.interfaces.find((i) => i.media === "ethernet");
+    if (eth0) {
+      eth0.dhcpClient = true;
+    }
+  }
   if (isL3Device(type) || type.startsWith("firewall")) {
     device.accessLists = [];
   }
@@ -320,6 +334,7 @@ export function createDemoLab(): LabState {
   printer.interfaces[0].ip = "192.168.1.50";
   printer.interfaces[0].mask = "255.255.255.0";
   printer.interfaces[0].gateway = "192.168.1.1";
+  printer.interfaces[0].dhcpClient = false;
   server.interfaces[0].ip = "192.168.1.100";
   server.interfaces[0].mask = "255.255.255.0";
   server.interfaces[0].gateway = "192.168.1.1";
@@ -648,6 +663,7 @@ export function updateDevice(
       | "macTable"
       | "accessLists"
       | "services"
+      | "printerService"
       | "arpTable"
       | "routes"
     >

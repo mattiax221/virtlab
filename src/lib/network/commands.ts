@@ -63,6 +63,7 @@ function helpPc(): string {
     "  nslookup <nome>          Query DNS",
     "  http <host>              GET HTTP su Server-PT",
     "  ftp <host>               Sessione FTP (user/pass, dir, get, bye)",
+    "  print / lpr <host>       Invia lavoro a Printer-PT",
     "  ntp sync                 Sincronizza orologio da Server-PT NTP",
     "  dir / delete <file>      File locali (simulati)",
     "  arp -a                   Cache ARP reale (imparata dai ping)",
@@ -77,6 +78,7 @@ function helpPc(): string {
     "  nslookup www.lab",
     "  ping server.lab",
     "  http www.lab",
+    "  print 192.168.1.50",
     "",
     "OS: Desktop → selettore Windows | Linux per passare a bash.",
   ].join("\n");
@@ -94,6 +96,7 @@ function helpLinux(): string {
     "  nslookup | dig <nome>         Query DNS",
     "  curl | wget <host>            GET HTTP su Server-PT",
     "  ftp <host>                    Sessione FTP",
+    "  lpr | print <host>            Invia lavoro a Printer-PT",
     "  ntpdate | chronyc sync        Sincronizza NTP",
     "  ls | rm <file>                File locali (simulati)",
     "  ip neigh | arp -a             Cache ARP",
@@ -107,6 +110,7 @@ function helpLinux(): string {
     "  ip addr add 192.168.1.20/24 gw 192.168.1.1",
     "  ping server.lab",
     "  curl www.lab",
+    "  lpr 192.168.1.50",
     "",
     "OS: Desktop → selettore Windows | Linux per tornare a CMD.",
   ].join("\n");
@@ -616,6 +620,12 @@ export function runLinuxCommand(
     return startFtpSession(ctx, target);
   }
 
+  if (lower.startsWith("lpr ") || lower.startsWith("print ")) {
+    const target = parts[1];
+    if (!target) return { output: "Uso: lpr <host|ip>   oppure   print <host|ip>" };
+    return submitPrintJob(ctx, target);
+  }
+
   if (
     lower === "ntpdate" ||
     lower === "ntp sync" ||
@@ -798,6 +808,12 @@ export function runPcCommand(
     return startFtpSession(ctx, target);
   }
 
+  if (lower.startsWith("print ") || lower.startsWith("lpr ")) {
+    const target = parts[1];
+    if (!target) return { output: "Uso: print <host|ip>   oppure   lpr <host|ip>" };
+    return submitPrintJob(ctx, target);
+  }
+
   if (lower === "ntp sync" || lower === "w32tm /resync") {
     const res = syncNtp(ctx.state, ctx.deviceId);
     ctx.setState(res.state);
@@ -855,6 +871,65 @@ export function runPcCommand(
 
   return {
     output: `'${parts[0]}' non è riconosciuto come comando interno o esterno,\nun programma eseguibile o un file batch.\nDigita help per l'elenco comandi.`,
+  };
+}
+
+function submitPrintJob(ctx: CommandContext, target: string): CommandResult {
+  let ip = target;
+  let state = ctx.state;
+  if (!/^\d+\.\d+\.\d+\.\d+$/.test(target)) {
+    const q = resolveDnsQuery(state, ctx.deviceId, target);
+    state = q.state;
+    if (!q.ip) return { output: `print: impossibile risolvere ${target}` };
+    ip = q.ip;
+  }
+  const { result, state: afterPing } = runPing(state, ctx.deviceId, ip);
+  ctx.setState(afterPing);
+  if (!result.ok) {
+    return {
+      output: `print: ${ip} non raggiungibile\n${result.message.split("\n")[0]}`,
+    };
+  }
+  const printer = afterPing.devices.find(
+    (d) =>
+      d.type === "printer" &&
+      d.interfaces.some((i) => i.ip === ip),
+  );
+  if (!printer) {
+    return { output: `print: nessun Printer-PT su ${ip}` };
+  }
+  if (!printer.powered) {
+    return { output: `print: ${printer.name} è spenta` };
+  }
+  const svc = printer.printerService ?? {
+    enabled: true,
+    shareName: printer.name,
+    queue: [],
+  };
+  if (!svc.enabled) {
+    return { output: `print: servizio PRINT disabilitato su ${printer.name}` };
+  }
+  const from = getDevice(afterPing, ctx.deviceId);
+  const job = {
+    id: `job-${Date.now().toString(36)}`,
+    from: from?.name ?? ctx.deviceId,
+    pages: 1 + Math.floor(Math.random() * 3),
+    status: "done" as const,
+    at: new Date().toLocaleTimeString("it-IT", { timeZone: "Europe/Rome" }),
+  };
+  const next = updateDevice(afterPing, printer.id, {
+    printerService: {
+      ...svc,
+      queue: [job, ...svc.queue].slice(0, 30),
+    },
+  });
+  ctx.setState(next);
+  return {
+    output: [
+      `Submitting job to \\\\${printer.name}\\${svc.shareName} (${ip})…`,
+      `Job ${job.id} — ${job.pages} page(s) — ${job.status}`,
+      `(coda stampante aggiornata)`,
+    ].join("\n"),
   };
 }
 

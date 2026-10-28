@@ -2,7 +2,17 @@
 
 import { useMemo, useState } from "react";
 import { runPing } from "@/lib/network/engine";
-import { isEndHost, type Device, type LabState } from "@/lib/network/types";
+import type { Device, DeviceKind, LabState } from "@/lib/network/types";
+
+function hasWindowsDesktop(type: DeviceKind): boolean {
+  return (
+    type === "pc" ||
+    type === "laptop" ||
+    type === "server" ||
+    type === "meraki_server"
+  );
+}
+
 /**
  * Desktop Remoto stile Packet Tracer: collega a un altro PC/Server raggiungibile.
  */
@@ -25,7 +35,7 @@ export function RemoteDesktop({
         (d) =>
           d.id !== device.id &&
           d.powered &&
-          isEndHost(d.type),
+          hasWindowsDesktop(d.type),
       )
       .map((d) => ({
         device: d,
@@ -52,7 +62,7 @@ export function RemoteDesktop({
     }
     const target = state.devices.find(
       (d) =>
-        isEndHost(d.type) &&
+        hasWindowsDesktop(d.type) &&
         d.interfaces.some((i) => i.ip === dest),
     );
     if (!target) {

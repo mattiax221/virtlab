@@ -246,6 +246,24 @@ export type Device = {
   };
   /** Firewall host (Desktop) — regole inbound/outbound semplificate */
   hostFirewall?: HostFirewall;
+  /** Servizio stampa (Printer-PT) */
+  printerService?: PrinterService;
+};
+
+export type PrintJob = {
+  id: string;
+  from: string;
+  pages: number;
+  status: "queued" | "printing" | "done" | "error";
+  at: string;
+};
+
+export type PrinterService = {
+  enabled: boolean;
+  shareName: string;
+  location?: string;
+  paper?: string;
+  queue: PrintJob[];
 };
 
 export type HostFirewallRule = {
@@ -480,7 +498,7 @@ export const DEVICE_META: Record<DeviceKind, Meta> = {
   server: { label: "Server", category: "end", ports: 1, hasOs: true, ptModel: "Server-PT" },
   meraki_server: { label: "Meraki Server", category: "end", ports: 1, hasOs: true, ptModel: "Meraki-Server-PT" },
   network_controller: { label: "Network Controller", category: "end", ports: 1, hasOs: false, ptModel: "Network-Controller" },
-  printer: { label: "Printer", category: "end", ports: 1, hasOs: false, ptModel: "Printer-PT" },
+  printer: { label: "Printer", category: "end", ports: 1, hasOs: true, ptModel: "Printer-PT" },
   ip_phone: { label: "IP Phone", category: "end", ports: 2, hasOs: false, ptModel: "IP-Phone-7960" },
   voip_device: { label: "VoIP Device", category: "end", ports: 1, hasOs: false, ptModel: "VoIP-Device" },
   analog_phone: { label: "Phone", category: "end", ports: 1, hasOs: false, ptModel: "Analog-Phone-PT" },

@@ -327,6 +327,13 @@ export const releases: ChangelogEntry[] = [
     detail:
       "Tab completa comandi (CMD/bash/IOS); Desktop Firewall con regole su ping.",
   },
+  {
+    sha: "pending",
+    date: "2026-10-28",
+    title: "Printer-PT configurabile",
+    detail:
+      "Config IP/DHCP, Physical, Services PRINT e coda; dai PC: print/lpr <ip>.",
+  },
 ];
 
 /**
@@ -465,6 +472,15 @@ export const todos: TodoItem[] = [
     title: "Firewall Desktop host",
     detail:
       "Regole allow/deny in/out su ICMP (e porte TCP/UDP) applicate al ping.",
+    status: "done",
+    epic: "desktop",
+    horizon: "now",
+  },
+  {
+    id: "printer-config",
+    title: "Printer-PT configurabile",
+    detail:
+      "Pannello Config (IP static/DHCP) + Physical + Services PRINT; print/lpr dai PC.",
     status: "done",
     epic: "desktop",
     horizon: "now",

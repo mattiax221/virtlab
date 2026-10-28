@@ -95,6 +95,13 @@ export const COMMAND_SECTIONS: CmdSection[] = [
         example: "ftp 192.168.1.100",
       },
       {
+        cmd: "print / lpr",
+        synopsis: "print <ip|nome> | lpr <ip|nome>",
+        does: "Invia un job alla coda del Printer-PT (dopo reachability).",
+        doesNot: "Niente driver PCL/PostScript reali né anteprima.",
+        example: "print 192.168.1.50",
+      },
+      {
         cmd: "ntp sync",
         synopsis: "ntp sync | w32tm /resync",
         does: "Sincronizza orologio desktop dal Server-PT NTP + SYSLOG.",
