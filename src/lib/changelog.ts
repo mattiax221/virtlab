@@ -355,11 +355,11 @@ export const releases: ChangelogEntry[] = [
       "Tolte note interne dalla pagina Changelog; workflow: GitHub pubblico → Vercel → /changelog.",
   },
   {
-    sha: "pending",
+    sha: "929f5ae",
     date: "2026-10-28",
     title: "Target GitHub mattiax221/virtlab",
     detail:
-      "Repo pubblico https://github.com/mattiax221/virtlab — in attesa di push autenticato.",
+      "Repo pubblico https://github.com/mattiax221/virtlab — codice pubblicato su main.",
   },
 ];
 
@@ -468,7 +468,7 @@ export const todos: TodoItem[] = [
     id: "deploy-virt-lab",
     title: "GitHub pubblico + Vercel",
     detail:
-      "Repo pubblico su GitHub, deploy Vercel, ogni update su GitHub + Vercel + /changelog.",
+      "Codice su https://github.com/mattiax221/virtlab — resta collegare Vercel al repo.",
     status: "doing",
     epic: "ship",
     horizon: "now",
