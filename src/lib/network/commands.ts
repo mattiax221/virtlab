@@ -91,6 +91,9 @@ function helpRouter(): string {
     "  exit",
     "  ping <indirizzo>",
     "  hostname <nome>",
+    "  copy tftp flash <ip> <file>   Scarica IOS dal Server-PT TFTP",
+    "  show flash                    Immagini in flash",
+    "  ntp sync                      Sincronizza da Server-PT NTP",
     "  help",
     "",
     "Inter-VLAN (router-on-a-stick):",
@@ -691,6 +694,85 @@ export function runRouterCommand(
   if (lower === "disable" || (lower === "exit" && cli.mode === "enable")) {
     setCli({ ...cli, mode: "user" });
     return { output: "" };
+  }
+
+  if (
+    (lower === "ntp sync" || lower === "ntp update-calendar") &&
+    (cli.mode === "enable" || cli.mode === "user")
+  ) {
+    const res = syncNtp(ctx.state, ctx.deviceId);
+    ctx.setState(res.state);
+    return { output: res.message };
+  }
+
+  if (
+    lower === "show flash" &&
+    (cli.mode === "enable" || cli.mode === "user")
+  ) {
+    const imgs = device.flashImages ?? [];
+    if (imgs.length === 0) {
+      return { output: "Directory of flash:/\n\nNo files found." };
+    }
+    return {
+      output: [
+        "Directory of flash:/",
+        "",
+        ...imgs.map(
+          (f, i) =>
+            `${String(i + 1).padStart(2)}.  ${String(f.sizeKb).padStart(8)} KB  ${f.name}`,
+        ),
+        "",
+        `${imgs.length} file(s)`,
+      ].join("\n"),
+    };
+  }
+
+  if (
+    lower.startsWith("copy tftp flash") &&
+    (cli.mode === "enable" || cli.mode === "config")
+  ) {
+    // copy tftp flash <ip> <filename>
+    const ip = parts[3];
+    const file = parts[4];
+    if (!ip || !file) {
+      return {
+        output:
+          "Uso: copy tftp flash <server-ip> <filename>\nEsempio: copy tftp flash 192.168.1.100 c1900-universalk9-mz.SPA.151-4.M4.bin",
+      };
+    }
+    const { result, state } = runPing(ctx.state, ctx.deviceId, ip);
+    ctx.setState(state);
+    if (!result.ok) {
+      return { output: `%Error opening tftp://${ip}/${file} (Timed out)` };
+    }
+    const server = state.devices.find(
+      (d) =>
+        d.interfaces.some((i) => i.ip === ip) && d.services?.tftp?.enabled,
+    );
+    const image = server?.services?.tftp?.images.find((i) => i.name === file);
+    if (!image) {
+      return {
+        output: `%Error opening tftp://${ip}/${file} (No such file)`,
+      };
+    }
+    const flash = [
+      ...(device.flashImages ?? []).filter((f) => f.name !== file),
+      { name: image.name, sizeKb: image.sizeKb },
+    ];
+    ctx.setState({
+      ...state,
+      devices: state.devices.map((d) =>
+        d.id === device.id ? { ...d, flashImages: flash } : d,
+      ),
+    });
+    return {
+      output: [
+        `Accessing tftp://${ip}/${file}...`,
+        `Loading ${file} from ${ip} (via FastEthernet0/0): !!!!!`,
+        `[OK - ${image.sizeKb}KB]`,
+        `${image.sizeKb * 1024} bytes copied in 0.120 secs`,
+      ].join("\n"),
+    };
   }
 
   if (

@@ -7,6 +7,7 @@ import {
 } from "@/lib/network/commands";
 import type { Device, LabState } from "@/lib/network/types";
 import type { SimPacket } from "@/lib/network/simulation";
+import { EmailClient } from "./EmailClient";
 import { NetworkConnections } from "./NetworkConnections";
 import { PhysicalPanel } from "./PhysicalPanel";
 import { ServerServices } from "./ServerServices";
@@ -24,6 +25,7 @@ type AppWindow =
   | "browser"
   | "editor"
   | "traffic"
+  | "email"
   | null;
 
 export function WindowsDesktop({
@@ -152,6 +154,12 @@ export function WindowsDesktop({
               active={app === "traffic"}
               onClick={() => setApp("traffic")}
             />
+            <DesktopIcon
+              label="Email"
+              kind="email"
+              active={app === "email"}
+              onClick={() => setApp("email")}
+            />
           </div>
 
           {app && (
@@ -257,6 +265,14 @@ export function WindowsDesktop({
                   }}
                 />
               )}
+              {app === "email" && (
+                <EmailClient
+                  device={device}
+                  stateRef={stateRef}
+                  setState={setState}
+                  onClose={() => setApp(null)}
+                />
+              )}
             </div>
           )}
 
@@ -306,6 +322,11 @@ export function WindowsDesktop({
                 Traffic Generator
               </div>
             )}
+            {app === "email" && (
+              <div className="rounded bg-slate-800 px-3 py-1 text-xs text-slate-200">
+                Email
+              </div>
+            )}
             <div className="ml-auto flex items-center gap-1 pr-1">
               <WifiTray
                 device={device}
@@ -336,7 +357,8 @@ function DesktopIcon({
     | "svc"
     | "browser"
     | "editor"
-    | "traffic";
+    | "traffic"
+    | "email";
   active?: boolean;
   onClick: () => void;
 }) {
@@ -353,6 +375,11 @@ function DesktopIcon({
           <span className="font-mono text-sm text-emerald-300">&gt;_</span>
         ) : kind === "svc" ? (
           <span className="text-sm font-bold text-amber-200">S</span>
+        ) : kind === "email" ? (
+          <svg viewBox="0 0 24 24" className="h-5 w-5 text-rose-100" fill="none" stroke="currentColor" strokeWidth="1.8">
+            <rect x="3" y="5" width="18" height="14" rx="1.5" />
+            <path d="M3 7l9 7 9-7" />
+          </svg>
         ) : kind === "traffic" ? (
           <svg viewBox="0 0 24 24" className="h-5 w-5 text-emerald-200" fill="none" stroke="currentColor" strokeWidth="1.8">
             <path d="M4 12h10M14 12l-3-3M14 12l-3 3" />

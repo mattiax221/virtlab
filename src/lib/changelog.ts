@@ -235,6 +235,13 @@ export const releases: ChangelogEntry[] = [
     detail:
       "Desktop Traffic Generator (PDU su canvas); FTP interattivo user/pass/dir/get; SYSLOG su link-up/power; ntp sync; DNS cache con TTL.",
   },
+  {
+    sha: "pending",
+    date: "2026-10-28",
+    title: "Client Email Desktop + TFTP flash",
+    detail:
+      "Email SMTP/POP3 sul Desktop (admin/studente); sui router copy tftp flash e show flash.",
+  },
 ];
 
 /** Roadmap / cose da fare (aggiornare quando si completa un item). */
@@ -281,8 +288,16 @@ export const todos: TodoItem[] = [
   {
     id: "email-client",
     title: "Client EMAIL sul Desktop",
-    detail: "Invio/ricezione messaggi SMTP/POP3 verso il servizio EMAIL del server.",
-    status: "todo",
+    detail:
+      "Inbox/compose SMTP+POP3 (utenti admin/studente @ lab.local, password cisco).",
+    status: "done",
+  },
+  {
+    id: "tftp-flash",
+    title: "TFTP flash IOS (simulato)",
+    detail:
+      "Router: `copy tftp flash <ip> <file>` e `show flash` dalle immagini TFTP del Server-PT.",
+    status: "done",
   },
   {
     id: "stp-unicast",
@@ -295,12 +310,6 @@ export const todos: TodoItem[] = [
     id: "aaa-auth",
     title: "AAA su login CLI router",
     detail: "Autenticazione RADIUS/TACACS verso il Server-PT per enable/login.",
-    status: "todo",
-  },
-  {
-    id: "tftp-flash",
-    title: "TFTP flash IOS (simulato)",
-    detail: "Copia immagine dal TFTP del server verso router/switch (simulazione).",
     status: "todo",
   },
   {

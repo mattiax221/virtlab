@@ -211,6 +211,8 @@ export type Device = {
   clockIso?: string;
   /** Ultimo server NTP usato */
   ntpServerId?: string;
+  /** Immagini flash ricevute via TFTP (simulato) */
+  flashImages?: { name: string; sizeKb: number }[];
 };
 
 export type DhcpLease = {
@@ -255,12 +257,24 @@ export type HttpService = {
 
 export type ServerUser = { username: string; password: string };
 
+export type MailMessage = {
+  id: string;
+  from: string;
+  to: string;
+  subject: string;
+  body: string;
+  time: string;
+  read?: boolean;
+};
+
 export type EmailService = {
   enabled: boolean;
   smtp: boolean;
   pop3: boolean;
   domain: string;
   users: ServerUser[];
+  /** Caselle per username (messaggi ricevuti) */
+  mailboxes?: Record<string, MailMessage[]>;
 };
 
 export type FtpPermissions = {

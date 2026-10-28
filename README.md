@@ -9,7 +9,7 @@ Laboratorio stile **Cisco Packet Tracer** nel browser.
 - **PC / Laptop / Server**: desktop Windows simulato con
   `Pannello di controllo \ Rete e Internet \ Connessioni di rete`
   → Proprietà adattatore → TCP/IPv4 (IP statico come in Windows)
-- Desktop PT-like: **Web Browser**, **Text Editor**, Prompt, Physical
+- Desktop PT-like: **Web Browser**, **Text Editor**, **Traffic Generator**, Prompt, Physical
 - Prompt dei comandi: `ipconfig`, `ping`, `nslookup`, `http`, `ftp`, …
 - **L2 switch (Cisco-like)**: LED porte, VLAN access/trunk, `show vlan brief`,
   `show mac address-table`, `show interfaces status`, isolamento tra VLAN

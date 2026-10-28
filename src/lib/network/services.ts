@@ -140,11 +140,28 @@ export function defaultServerServices(name: string): DeviceServices {
       authPassword: "",
     },
     email: {
-      enabled: false,
+      enabled: true,
       smtp: true,
       pop3: true,
       domain: "lab.local",
-      users: [],
+      users: [
+        { username: "admin", password: "cisco" },
+        { username: "studente", password: "cisco" },
+      ],
+      mailboxes: {
+        admin: [
+          {
+            id: "welcome",
+            from: "postmaster@lab.local",
+            to: "admin@lab.local",
+            subject: "Benvenuto su Server-PT",
+            body: "Casella EMAIL attiva. Usa il client Desktop per rispondere.",
+            time: new Date().toISOString(),
+            read: false,
+          },
+        ],
+        studente: [],
+      },
     },
     ftp: {
       enabled: true,
