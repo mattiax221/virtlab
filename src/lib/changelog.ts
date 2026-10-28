@@ -306,6 +306,13 @@ export const releases: ChangelogEntry[] = [
     detail:
       "Todo list ripensata: Subito / Prossimo / Visione (OSPF, classroom, IoT, CyberOps, tutor AI, tracce CCNA).",
   },
+  {
+    sha: "0cb9f72",
+    date: "2026-10-28",
+    title: "Pagina Comandi + SSH CLI remota",
+    detail:
+      "/comandi (a cosa serve / cosa non fa); Telnet/SSH Desktop apre la CLI del router/switch.",
+  },
 ];
 
 /**
