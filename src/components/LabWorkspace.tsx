@@ -58,7 +58,6 @@ function snap(n: number): number {
 }
 import { ContextMenu, type MenuItem } from "./ContextMenu";
 import { DeviceIcon } from "./DeviceIcon";
-import { ExercisesPanel } from "./ExercisesPanel";
 import { PortPicker } from "./PortPicker";
 import { RouterConsole } from "./RouterConsole";
 import { SimOverlay } from "./SimOverlay";
@@ -163,7 +162,6 @@ export function LabWorkspace() {
   const [inspectId, setInspectId] = useState<string | null>(null);
   const [simPackets, setSimPackets] = useState<SimPacket[] | null>(null);
   const [simFrom, setSimFrom] = useState<string | null>(null);
-  const [showExercises, setShowExercises] = useState(true);
   const [showExport, setShowExport] = useState(false);
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
@@ -749,6 +747,13 @@ export function LabWorkspace() {
         >
           Changelog
         </a>
+        <a
+          href="/esercizi"
+          className="mr-1 hidden rounded px-2 py-1 text-[11px] text-slate-400 hover:bg-slate-800 hover:text-sky-300 sm:inline"
+          title="Checklist esercizi lab"
+        >
+          Esercizi
+        </a>
         <div className="mx-1 h-4 w-px bg-slate-700" />
 
         <ToolButton
@@ -1264,28 +1269,6 @@ export function LabWorkspace() {
               packets={simPackets}
               onDone={() => setSimPackets(null)}
             />
-          )}
-
-          {showExercises && (
-            <div className="absolute bottom-3 right-3 z-20 w-72">
-              <ExercisesPanel state={state} />
-              <button
-                type="button"
-                className="mt-1 text-[10px] text-slate-500 hover:text-slate-300"
-                onClick={() => setShowExercises(false)}
-              >
-                Nascondi esercizi
-              </button>
-            </div>
-          )}
-          {!showExercises && (
-            <button
-              type="button"
-              className="absolute bottom-3 right-3 z-20 rounded border border-slate-700 bg-slate-900/90 px-2 py-1 text-[10px] text-slate-400"
-              onClick={() => setShowExercises(true)}
-            >
-              Esercizi
-            </button>
           )}
 
           {toast && (

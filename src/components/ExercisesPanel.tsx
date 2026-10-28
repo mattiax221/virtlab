@@ -4,7 +4,7 @@ import { isL3Device, type LabState } from "@/lib/network/types";
 
 type Check = { id: string; label: string; ok: boolean; hint?: string };
 
-function evaluate(state: LabState): Check[] {
+export function evaluateExercises(state: LabState): Check[] {
   const pcs = state.devices.filter((d) => d.type === "pc");
   const sw = state.devices.find(
     (d) => d.type.startsWith("switch") || d.type === "multilayer_switch",
@@ -40,11 +40,6 @@ function evaluate(state: LabState): Check[] {
       if (i.vlanTag) vlanIds.add(i.vlanTag);
     }
   }
-  const accessVlans = new Set(
-    sw?.interfaces
-      .filter((i) => i.mode === "access" && i.connectedLinkId && i.accessVlan)
-      .map((i) => i.accessVlan!) ?? [],
-  );
   const pcsOnDifferentVlans = (() => {
     const vlans = new Set<number>();
     for (const pc of pcs) {
@@ -81,11 +76,11 @@ function evaluate(state: LabState): Check[] {
 
   return [
     {
-      id: "topo",
+      id: "pcs",
       label: "Almeno 2 PC collegati allo switch",
       ok:
-        pcs.length >= 2 &&
-        (sw?.interfaces.filter((i) => i.connectedLinkId).length ?? 0) >= 2,
+        pcs.filter((p) => p.interfaces.some((i) => i.connectedLinkId)).length >=
+        2,
     },
     {
       id: "ip",
@@ -112,7 +107,7 @@ function evaluate(state: LabState): Check[] {
     {
       id: "vlan-access",
       label: "VLAN: due porte access su VLAN diverse + PC collegati",
-      ok: accessVlans.size >= 2 && pcsOnDifferentVlans,
+      ok: pcsOnDifferentVlans,
       hint: "PC-A su Fa0/1 VLAN 10, PC-B su Fa0/2 VLAN 20",
     },
     {
@@ -122,7 +117,7 @@ function evaluate(state: LabState): Check[] {
       hint: "Switch porta verso router → mode trunk",
     },
     {
-      id: "vlan-rois",
+      id: "vlan-stick",
       label: "VLAN: router-on-a-stick (subinterface .10 / .20)",
       ok: subIfs,
       hint: "interface Gi0/0.10 → encapsulation dot1Q 10 → ip address …",
@@ -157,31 +152,86 @@ function evaluate(state: LabState): Check[] {
 }
 
 export function ExercisesPanel({ state }: { state: LabState }) {
-  const checks = evaluate(state);
+  const checks = evaluateExercises(state);
   const done = checks.filter((c) => c.ok).length;
   const vlanGuide = checks.filter((c) => c.id.startsWith("vlan-"));
+  const pct = Math.round((done / checks.length) * 100);
 
   return (
-    <div className="rounded-lg border border-slate-700 bg-slate-950/90 p-3 text-xs text-slate-200 shadow-xl">
-      <div className="font-medium text-sky-200">
-        Esercizi lab ({done}/{checks.length})
+    <div className="space-y-8">
+      <div>
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h2 className="font-display text-2xl font-semibold text-white">
+              Checklist lab
+            </h2>
+            <p className="mt-1 text-sm text-slate-400">
+              Completati {done}/{checks.length} · Passi VLAN{" "}
+              {vlanGuide.filter((c) => c.ok).length}/{vlanGuide.length}
+            </p>
+          </div>
+          <div className="text-right">
+            <div className="font-display text-3xl font-bold text-sky-300">
+              {pct}%
+            </div>
+            <div className="text-[11px] uppercase tracking-wide text-slate-500">
+              progresso
+            </div>
+          </div>
+        </div>
+        <div className="mt-4 h-2 overflow-hidden rounded-full bg-slate-800">
+          <div
+            className="h-full rounded-full bg-sky-500 transition-all"
+            style={{ width: `${pct}%` }}
+          />
+        </div>
       </div>
-      <p className="mt-1 text-[10px] leading-snug text-slate-500">
-        Guida VLAN: PC in VLAN diverse → trunk → router-on-a-stick. Poi ping
-        inter-VLAN.
-      </p>
-      <ul className="mt-2 space-y-1.5">
+
+      <section className="rounded-xl border border-slate-700/80 bg-slate-900/50 p-5">
+        <h3 className="text-sm font-semibold text-sky-200">Guida VLAN</h3>
+        <p className="mt-2 text-sm leading-relaxed text-slate-400">
+          PC in VLAN diverse → trunk sullo switch → router-on-a-stick
+          (subinterface + encapsulation dot1Q). Poi ping inter-VLAN.
+        </p>
+        <ol className="mt-4 list-decimal space-y-2 pl-5 text-sm text-slate-300">
+          <li>Crea VLAN 10 e 20 sullo switch</li>
+          <li>Porte access: PC-A VLAN 10, PC-B VLAN 20</li>
+          <li>Porta verso il router in trunk</li>
+          <li>
+            Sul router: <code className="text-sky-300">Gi0/0.10</code> /{" "}
+            <code className="text-sky-300">.20</code> con IP di gateway
+          </li>
+        </ol>
+      </section>
+
+      <ul className="space-y-2">
         {checks.map((c) => (
-          <li key={c.id} className="flex items-start gap-2">
-            <span className={c.ok ? "text-emerald-400" : "text-slate-600"}>
+          <li
+            key={c.id}
+            className={`flex items-start gap-3 rounded-lg border px-4 py-3 ${
+              c.ok
+                ? "border-emerald-500/30 bg-emerald-500/5"
+                : "border-slate-700/80 bg-slate-900/40"
+            }`}
+          >
+            <span
+              className={`mt-0.5 text-base ${
+                c.ok ? "text-emerald-400" : "text-slate-600"
+              }`}
+              aria-hidden
+            >
               {c.ok ? "✓" : "○"}
             </span>
-            <span className="min-w-0">
-              <span className={c.ok ? "text-slate-300" : "text-slate-500"}>
+            <span className="min-w-0 flex-1">
+              <span
+                className={`text-sm ${
+                  c.ok ? "text-slate-100" : "text-slate-400"
+                }`}
+              >
                 {c.label}
               </span>
               {!c.ok && c.hint && (
-                <span className="mt-0.5 block text-[10px] text-slate-600">
+                <span className="mt-1 block text-xs text-slate-500">
                   {c.hint}
                 </span>
               )}
@@ -189,9 +239,6 @@ export function ExercisesPanel({ state }: { state: LabState }) {
           </li>
         ))}
       </ul>
-      <div className="mt-3 border-t border-slate-800 pt-2 text-[10px] text-slate-500">
-        Passi VLAN: {vlanGuide.filter((c) => c.ok).length}/{vlanGuide.length}
-      </div>
     </div>
   );
 }
