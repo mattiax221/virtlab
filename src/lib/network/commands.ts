@@ -14,7 +14,12 @@ import {
   formatVlanBrief,
   l2Flood,
 } from "./l2";
-import { fetchHttp, releaseDhcp, requestDhcp } from "./services";
+import {
+  fetchHttp,
+  releaseDhcp,
+  requestDhcp,
+  resolveDnsName,
+} from "./services";
 import type { CommandResult, LabState, StaticRoute, VlanRecord } from "./types";
 
 export type CommandContext = {
@@ -25,22 +30,28 @@ export type CommandContext = {
 
 function helpPc(): string {
   return [
-    "Comandi disponibili (stile Windows CMD):",
+    "Comandi disponibili (stile Windows CMD / Packet Tracer):",
     "  ipconfig                 Mostra la configurazione IP",
     "  ipconfig /all            Dettagli completi (MAC, gateway)",
     "  ipconfig /ip <ip> <mask> [gateway]",
     "                           Imposta IP statico",
     "  ipconfig /renew          Richiede IP via DHCP",
+    "  ipconfig /release        Rilascia lease DHCP",
     "  ping <indirizzo|nome>    ICMP (anche nomi DNS tipo server.lab)",
+    "  nslookup <nome>          Query DNS",
     "  http <host>              GET HTTP su Server-PT",
+    "  ftp <host>               Elenca file/account FTP del server",
+    "  dir / delete <file>      File locali (simulati)",
     "  arp -a                   Cache ARP reale (imparata dai ping)",
     "  route print              Tabella di routing",
+    "  netstat                  Connessioni simulazione",
     "  hostname                 Nome del PC",
     "  cls / clear              Pulisce lo schermo",
     "  help                     Questo aiuto",
     "",
     "Esempio:",
     "  ipconfig /renew",
+    "  nslookup www.lab",
     "  ping server.lab",
     "  http www.lab",
   ].join("\n");
@@ -336,6 +347,71 @@ export function runPcCommand(
     return { output: res.output };
   }
 
+  if (lower.startsWith("nslookup ")) {
+    const name = parts[1];
+    if (!name) return { output: "Uso: nslookup <nome>" };
+    const device = getDevice(ctx.state, ctx.deviceId);
+    const dns =
+      device?.interfaces.find((i) => i.dnsServers.length)?.dnsServers[0] ??
+      "???";
+    const ip = resolveDnsName(ctx.state, ctx.deviceId, name);
+    if (!ip) {
+      return {
+        output: [
+          `Server:  ${dns}`,
+          `Address:  ${dns}`,
+          ``,
+          `*** ${dns} non trova ${name}: Non-existent domain`,
+        ].join("\n"),
+      };
+    }
+    return {
+      output: [
+        `Server:  ${dns}`,
+        `Address:  ${dns}`,
+        ``,
+        `Nome:    ${name}`,
+        `Address:  ${ip}`,
+      ].join("\n"),
+    };
+  }
+
+  if (lower.startsWith("ftp ")) {
+    const target = parts[1];
+    if (!target) return { output: "Uso: ftp <host|ip>" };
+    return { output: ftpList(ctx, target) };
+  }
+
+  if (lower === "dir" || lower === "dir /") {
+    return {
+      output: [
+        ` Directory of C:\\Users\\Studente`,
+        ``,
+        `01/01/2026  12:00    <DIR>          .`,
+        `01/01/2026  12:00    <DIR>          ..`,
+        `01/01/2026  12:00                48 readme.txt`,
+        `               1 File(s)             48 bytes`,
+      ].join("\n"),
+    };
+  }
+
+  if (lower.startsWith("delete ") || lower.startsWith("del ")) {
+    const file = parts[1];
+    if (!file) return { output: "Uso: delete <file>" };
+    return { output: `Eliminato ${file}` };
+  }
+
+  if (lower === "netstat") {
+    return {
+      output: [
+        `Connessioni attive`,
+        ``,
+        `  Proto  Indirizzo locale          Indirizzo esterno        Stato`,
+        `  TCP    0.0.0.0:0                 0.0.0.0:0                LISTENING`,
+      ].join("\n"),
+    };
+  }
+
   if (lower === "arp -a" || lower === "arp") {
     return { output: arpTable(ctx) };
   }
@@ -347,6 +423,65 @@ export function runPcCommand(
   return {
     output: `'${parts[0]}' non è riconosciuto come comando interno o esterno,\nun programma eseguibile o un file batch.\nDigita help per l'elenco comandi.`,
   };
+}
+
+function ftpList(ctx: CommandContext, target: string): string {
+  let ip = target;
+  if (!/^\d+\.\d+\.\d+\.\d+$/.test(target)) {
+    const resolved = resolveDnsName(ctx.state, ctx.deviceId, target);
+    if (!resolved) return `ftp: Impossibile risolvere ${target}`;
+    ip = resolved;
+  }
+  const { result, state } = runPing(ctx.state, ctx.deviceId, ip);
+  ctx.setState(state);
+  if (!result.ok) {
+    return `ftp: connessione a ${ip} fallita — host non raggiungibile`;
+  }
+  const server = state.devices.find(
+    (d) =>
+      d.interfaces.some((i) => i.ip === ip) && d.services?.ftp,
+  );
+  if (!server?.services?.ftp) {
+    return `ftp: nessun servizio FTP su ${ip}`;
+  }
+  const ftp = server.services.ftp;
+  if (!ftp.enabled) {
+    return `ftp: servizio FTP disabilitato su ${server.name}`;
+  }
+  const accounts =
+    ftp.accounts.length === 0
+      ? "  (nessun account — aggiungine in Services → FTP)"
+      : ftp.accounts
+          .map(
+            (a) =>
+              `  ${a.username}  perms=${[
+                a.permissions.read && "R",
+                a.permissions.write && "W",
+                a.permissions.delete && "D",
+                a.permissions.rename && "N",
+                a.permissions.list && "L",
+              ]
+                .filter(Boolean)
+                .join("")}`,
+          )
+          .join("\n");
+  const files =
+    ftp.files.length === 0
+      ? "  (vuoto)"
+      : ftp.files.map((f) => `  ${f.name.padEnd(24)} ${f.size} B`).join("\n");
+  return [
+    `Connected to ${server.name} (${ip}).`,
+    `220 ${server.name} FTP server ready.`,
+    `Service: ${ftp.enabled ? "ON" : "OFF"}`,
+    ``,
+    `Accounts:`,
+    accounts,
+    ``,
+    `Files:`,
+    files,
+    ``,
+    `221 Goodbye.`,
+  ].join("\n");
 }
 
 export type RouterCliMode =

@@ -10,9 +10,18 @@ import { NetworkConnections } from "./NetworkConnections";
 import { PhysicalPanel } from "./PhysicalPanel";
 import { ServerServices } from "./ServerServices";
 import { Terminal } from "./Terminal";
+import { TextEditor } from "./TextEditor";
+import { WebBrowser } from "./WebBrowser";
 import { WifiTray } from "./WifiTray";
 
-type AppWindow = "network" | "cmd" | "physical" | "services" | null;
+type AppWindow =
+  | "network"
+  | "cmd"
+  | "physical"
+  | "services"
+  | "browser"
+  | "editor"
+  | null;
 
 export function WindowsDesktop({
   device,
@@ -118,6 +127,18 @@ export function WindowsDesktop({
                 onClick={() => setApp("services")}
               />
             )}
+            <DesktopIcon
+              label="Web Browser"
+              kind="browser"
+              active={app === "browser"}
+              onClick={() => setApp("browser")}
+            />
+            <DesktopIcon
+              label="Text Editor"
+              kind="editor"
+              active={app === "editor"}
+              onClick={() => setApp("editor")}
+            />
           </div>
 
           {app && (
@@ -190,13 +211,27 @@ export function WindowsDesktop({
                         `IP: ${eth?.ip ?? "(non configurato)"}`,
                         ``,
                         `Physical: spegni → rimuovi Ethernet → aggiungi Wi‑Fi.`,
-                        `Comandi: ipconfig | ping`,
+                        `Comandi: ipconfig | ping | nslookup | http | ftp | help`,
                         ``,
                       ]}
                       onCommand={(line) => runPcCommand(line, makeCtx())}
                     />
                   </div>
                 </>
+              )}
+              {app === "browser" && (
+                <WebBrowser
+                  device={device}
+                  stateRef={stateRef}
+                  setState={setState}
+                  onClose={() => setApp(null)}
+                />
+              )}
+              {app === "editor" && (
+                <TextEditor
+                  deviceName={live.name}
+                  onClose={() => setApp(null)}
+                />
               )}
             </div>
           )}
@@ -232,6 +267,16 @@ export function WindowsDesktop({
                 Servizi
               </div>
             )}
+            {app === "browser" && (
+              <div className="rounded bg-slate-800 px-3 py-1 text-xs text-slate-200">
+                Web Browser
+              </div>
+            )}
+            {app === "editor" && (
+              <div className="rounded bg-slate-800 px-3 py-1 text-xs text-slate-200">
+                Text Editor
+              </div>
+            )}
             <div className="ml-auto flex items-center gap-1 pr-1">
               <WifiTray
                 device={device}
@@ -254,7 +299,7 @@ function DesktopIcon({
   onClick,
 }: {
   label: string;
-  kind: "pc" | "cmd" | "net" | "phys" | "svc";
+  kind: "pc" | "cmd" | "net" | "phys" | "svc" | "browser" | "editor";
   active?: boolean;
   onClick: () => void;
 }) {
@@ -271,6 +316,16 @@ function DesktopIcon({
           <span className="font-mono text-sm text-emerald-300">&gt;_</span>
         ) : kind === "svc" ? (
           <span className="text-sm font-bold text-amber-200">S</span>
+        ) : kind === "browser" ? (
+          <svg viewBox="0 0 24 24" className="h-5 w-5 text-sky-100" fill="none" stroke="currentColor" strokeWidth="1.8">
+            <circle cx="12" cy="12" r="9" />
+            <path d="M3 12h18M12 3c2.5 3 2.5 15 0 18M12 3c-2.5 3-2.5 15 0 18" />
+          </svg>
+        ) : kind === "editor" ? (
+          <svg viewBox="0 0 24 24" className="h-5 w-5 text-amber-100" fill="none" stroke="currentColor" strokeWidth="1.8">
+            <path d="M5 4h10l4 4v12H5z" />
+            <path d="M15 4v4h4M8 12h8M8 16h6" />
+          </svg>
         ) : kind === "net" ? (
           <svg viewBox="0 0 24 24" className="h-5 w-5 text-sky-200" fill="none" stroke="currentColor" strokeWidth="1.8">
             <circle cx="6" cy="12" r="2.5" />
