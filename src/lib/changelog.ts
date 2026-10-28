@@ -313,6 +313,13 @@ export const releases: ChangelogEntry[] = [
     detail:
       "/comandi (a cosa serve / cosa non fa); Telnet/SSH Desktop apre la CLI del router/switch.",
   },
+  {
+    sha: "pending",
+    date: "2026-10-28",
+    title: "Desktop Windows o Linux a scelta",
+    detail:
+      "Selettore OS sul Desktop: CMD Windows oppure bash (ip addr, dhclient, curl, dig…).",
+  },
 ];
 
 /**
@@ -453,6 +460,15 @@ export const todos: TodoItem[] = [
       "/comandi con filtro device e per ogni comando: a cosa serve / cosa non fa.",
     status: "done",
     epic: "pedagogy",
+    horizon: "now",
+  },
+  {
+    id: "host-os-choice",
+    title: "Desktop Windows | Linux",
+    detail:
+      "Su PC/Laptop/Server scegli OS: CMD (ipconfig) o bash (ip addr, dhclient, curl).",
+    status: "done",
+    epic: "desktop",
     horizon: "now",
   },
 

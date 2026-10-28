@@ -6,7 +6,7 @@ import { COMMAND_SECTIONS, type CmdSection } from "@/lib/command-docs";
 
 const FILTERS: { id: "all" | CmdSection["device"]; label: string }[] = [
   { id: "all", label: "Tutti" },
-  { id: "pc", label: "PC / Laptop" },
+  { id: "pc", label: "PC (Win / Linux)" },
   { id: "router", label: "Router" },
   { id: "switch", label: "Switch" },
   { id: "server", label: "Server" },

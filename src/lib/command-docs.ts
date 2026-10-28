@@ -23,10 +23,10 @@ export type CmdSection = {
 export const COMMAND_SECTIONS: CmdSection[] = [
   {
     id: "pc",
-    title: "PC / Laptop — Command Prompt",
+    title: "PC / Laptop — Windows CMD",
     device: "pc",
     blurb:
-      "Desktop → Command Prompt. Simula un CMD Windows: IP, ping, DNS, HTTP, FTP, NTP.",
+      "Desktop → selettore Windows → Command Prompt. CMD: IP, ping, DNS, HTTP, FTP, NTP. Puoi passare a Linux sullo stesso host.",
     commands: [
       {
         cmd: "help",
@@ -119,6 +119,89 @@ export const COMMAND_SECTIONS: CmdSection[] = [
         cmd: "hostname / cls",
         does: "Nome host; clear schermo.",
         doesNot: "hostname non rinomina il device in topologia.",
+      },
+    ],
+  },
+  {
+    id: "linux",
+    title: "PC / Laptop — Linux bash",
+    device: "pc",
+    blurb:
+      "Desktop → selettore Linux → Terminal. Stesse capacità di rete del CMD, sintassi GNU/Linux.",
+    commands: [
+      {
+        cmd: "ip addr / ifconfig",
+        synopsis: "ip addr | ip a | ifconfig",
+        does: "Mostra interfacce eth/wlan con IP, mask, MAC e stato link.",
+        doesNot: "Niente ip -j / netplan; etichette eth0 stilizzate.",
+      },
+      {
+        cmd: "ip addr add",
+        synopsis: "ip addr add <ip>/<cidr> [gw <gateway>]",
+        does: "Imposta IP statico sulla NIC preferita (Ethernet).",
+        doesNot: "Niente `dev eth0` obbligatorio; un’interfaccia alla volta.",
+        example: "ip addr add 192.168.1.20/24 gw 192.168.1.1",
+      },
+      {
+        cmd: "ifconfig … netmask",
+        synopsis: "ifconfig <iface> <ip> netmask <mask> [gw <gateway>]",
+        does: "Stesso effetto di ip addr add, stile classico.",
+        doesNot: "Il nome iface è cosmetico (configura comunque la NIC preferita).",
+        example: "ifconfig eth0 192.168.1.20 netmask 255.255.255.0 gw 192.168.1.1",
+      },
+      {
+        cmd: "dhclient / dhclient -r",
+        does: "Renew / release DHCP verso Server-PT.",
+        doesNot: "Niente lease file persistente; equivalente a ipconfig /renew|/release.",
+      },
+      {
+        cmd: "ping",
+        synopsis: "ping <ip|nome>",
+        does: "ICMP simulato (come Windows).",
+        doesNot: "Niente -c / -i opzioni.",
+      },
+      {
+        cmd: "nslookup / dig",
+        does: "Query A sul DNS Server-PT; dig in formato DiG.",
+        doesNot: "Niente zone transfer / EDNS.",
+        example: "dig www.lab",
+      },
+      {
+        cmd: "curl / wget",
+        synopsis: "curl <host|ip[/page]>",
+        does: "GET HTTP su Server-PT (dopo reachability).",
+        doesNot: "Niente HTTPS reale, header custom, POST.",
+        example: "curl www.lab",
+      },
+      {
+        cmd: "ftp",
+        does: "Sessione FTP interattiva (come su Windows).",
+        doesNot: "—",
+      },
+      {
+        cmd: "ntpdate / chronyc sync",
+        does: "Sync orologio da Server-PT NTP.",
+        doesNot: "Niente pool.ntp.org reale.",
+      },
+      {
+        cmd: "ip neigh / arp -a",
+        does: "Cache ARP.",
+        doesNot: "Formato ancora stile tabella didattica.",
+      },
+      {
+        cmd: "ip route / route -n",
+        does: "Tabella routing kernel stilizzata.",
+        doesNot: "Niente ip route add persistente da shell (usa Network Settings).",
+      },
+      {
+        cmd: "ls / rm / ss / hostname / uname -a / clear",
+        does: "Utility base demo + clear schermo.",
+        doesNot: "Filesystem non persistente; ss è stub.",
+      },
+      {
+        cmd: "ipconfig (su Linux)",
+        does: "Messaggio: command not found + suggerimento di passare a Windows o usare ip addr.",
+        doesNot: "Non esegue la sintassi Windows sul bash.",
       },
     ],
   },

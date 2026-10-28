@@ -77,6 +77,14 @@ export function createDevice(
       band: "2.4",
     };
   }
+  if (
+    type === "pc" ||
+    type === "laptop" ||
+    type === "server" ||
+    type === "meraki_server"
+  ) {
+    device.hostOs = "windows";
+  }
   if (type === "server" || type === "meraki_server") {
     device.services = defaultServerServices(name);
     // IP statico tipico Server-PT sulla prima Ethernet
@@ -634,6 +642,7 @@ export function updateDevice(
     Pick<
       Device,
       | "name"
+      | "hostOs"
       | "vlans"
       | "macTable"
       | "accessLists"

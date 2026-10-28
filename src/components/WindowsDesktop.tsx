@@ -10,10 +10,13 @@ import {
   type RouterCliState,
 } from "@/lib/network/commands";
 import { runPing } from "@/lib/network/engine";
+import { updateDevice } from "@/lib/network/engine";
 import {
+  getHostOs,
   isL3Device,
   isManagedSwitch,
   type Device,
+  type HostOs,
   type LabState,
 } from "@/lib/network/types";
 import type { SimPacket } from "@/lib/network/simulation";
@@ -80,12 +83,31 @@ type Shortcut = {
 };
 
 /** Shortcut Desktop stile Packet Tracer — etichette corte e leggibili. */
-const SHORTCUTS: Shortcut[] = [
+const SHORTCUTS_WIN: Shortcut[] = [
   { id: "ipconfig", label: "IP Configuration", icon: "ip" },
   { id: "cmd", label: "Command Prompt", icon: "cmd" },
   { id: "terminal", label: "Terminal", icon: "terminal" },
   { id: "browser", label: "Web Browser", icon: "browser" },
   { id: "wireless", label: "PC Wireless", icon: "wireless" },
+  { id: "vpn", label: "VPN", icon: "vpn" },
+  { id: "traffic", label: "Traffic Generator", icon: "traffic" },
+  { id: "email", label: "Email", icon: "email" },
+  { id: "pppoe", label: "PPPoE Dialer", icon: "pppoe" },
+  { id: "editor", label: "Text Editor", icon: "editor" },
+  { id: "rdp", label: "Remote Desktop", icon: "rdp" },
+  { id: "ssh", label: "Telnet / SSH", icon: "ssh" },
+  { id: "firewall", label: "Firewall", icon: "firewall", stub: true },
+  { id: "mib", label: "MIB Browser", icon: "mib", stub: true },
+  { id: "voip", label: "IP Communicator", icon: "voip", stub: true },
+  { id: "physical", label: "Physical", icon: "physical" },
+  { id: "services", label: "Services", icon: "services", serverOnly: true },
+];
+
+const SHORTCUTS_LINUX: Shortcut[] = [
+  { id: "ipconfig", label: "Network Settings", icon: "ip" },
+  { id: "cmd", label: "Terminal", icon: "terminal" },
+  { id: "browser", label: "Web Browser", icon: "browser" },
+  { id: "wireless", label: "Wi‑Fi", icon: "wireless" },
   { id: "vpn", label: "VPN", icon: "vpn" },
   { id: "traffic", label: "Traffic Generator", icon: "traffic" },
   { id: "email", label: "Email", icon: "email" },
@@ -121,10 +143,22 @@ export function WindowsDesktop({
   const eth = live.interfaces.find((i) => !i.parentIfaceId);
   const isServer =
     live.type === "server" || live.type === "meraki_server";
+  const hostOs = getHostOs(live);
+  const isLinux = hostOs === "linux";
   const [clock, setClock] = useState("--:--");
   const [app, setApp] = useState<AppId>(null);
   const [stubName, setStubName] = useState("");
   const [remoteTarget, setRemoteTarget] = useState<Device | null>(null);
+
+  function setHostOs(next: HostOs) {
+    const updated = updateDevice(stateRef.current, device.id, {
+      hostOs: next,
+    });
+    stateRef.current = updated;
+    setState(updated);
+    // Chiudi shell aperta così riparte col prompt giusto
+    if (app === "cmd" || app === "terminal") setApp(null);
+  }
 
   useEffect(() => {
     const tick = () => {
@@ -163,7 +197,7 @@ export function WindowsDesktop({
     setApp(s.id);
   }
 
-  const icons = SHORTCUTS.filter((s) => {
+  const icons = (isLinux ? SHORTCUTS_LINUX : SHORTCUTS_WIN).filter((s) => {
     if (s.serverOnly && !isServer) return false;
     if (s.id === "rdp" && nested) return false;
     return true;
@@ -195,26 +229,58 @@ export function WindowsDesktop({
               {live.name}
             </span>
             <span className="hidden text-slate-500 sm:inline">
-              · tab Desktop (Packet Tracer)
+              · {isLinux ? "Linux Desktop" : "Windows Desktop"}
             </span>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded px-2 py-1 text-slate-300 transition hover:bg-rose-600 hover:text-white"
-          >
-            {nested ? "Disconnetti" : "Chiudi"}
-          </button>
+          <div className="flex items-center gap-2">
+            <div
+              className="flex overflow-hidden rounded border border-slate-600 text-[11px]"
+              title="Sistema operativo del Desktop (CMD vs bash)"
+            >
+              <button
+                type="button"
+                onClick={() => setHostOs("windows")}
+                className={`px-2.5 py-1 transition ${
+                  !isLinux
+                    ? "bg-sky-600 text-white"
+                    : "bg-slate-800 text-slate-400 hover:text-slate-200"
+                }`}
+              >
+                Windows
+              </button>
+              <button
+                type="button"
+                onClick={() => setHostOs("linux")}
+                className={`px-2.5 py-1 transition ${
+                  isLinux
+                    ? "bg-amber-600 text-white"
+                    : "bg-slate-800 text-slate-400 hover:text-slate-200"
+                }`}
+              >
+                Linux
+              </button>
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded px-2 py-1 text-slate-300 transition hover:bg-rose-600 hover:text-white"
+            >
+              {nested ? "Disconnetti" : "Chiudi"}
+            </button>
+          </div>
         </div>
 
         <div
           className="relative flex min-h-0 flex-1 flex-col"
           style={{
-            background: live.powered
-              ? "linear-gradient(180deg, #0c356e 0%, #082448 100%)"
-              : "linear-gradient(145deg, #1e293b 0%, #0f172a 100%)",
-            fontFamily:
-              "Tahoma, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif",
+            background: !live.powered
+              ? "linear-gradient(145deg, #1e293b 0%, #0f172a 100%)"
+              : isLinux
+                ? "linear-gradient(165deg, #1a3a2f 0%, #0d1f18 45%, #12261c 100%)"
+                : "linear-gradient(180deg, #0c356e 0%, #082448 100%)",
+            fontFamily: isLinux
+              ? "'Ubuntu', 'Cantarell', 'DejaVu Sans', sans-serif"
+              : "Tahoma, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif",
           }}
         >
           {/* Griglia shortcut PT */}
@@ -279,23 +345,41 @@ export function WindowsDesktop({
               {(app === "cmd" || app === "terminal") && (
                 <>
                   <PanelTitle dark onClose={() => setApp(null)}>
-                    {app === "terminal"
-                      ? `Terminal — ${live.name}`
-                      : `Command Prompt — ${live.name}`}
+                    {isLinux
+                      ? `Terminal — ${live.name} (bash)`
+                      : app === "terminal"
+                        ? `Terminal — ${live.name}`
+                        : `Command Prompt — ${live.name}`}
                   </PanelTitle>
                   <div className="min-h-0 flex-1">
                     <Terminal
-                      prompt={`C:\\Users\\Studente>`}
-                      accent="#f0f0f0"
-                      background="#0c0c0c"
-                      welcome={[
-                        `Microsoft Windows [Versione NetLab 10.0]`,
-                        `(c) NetLab — ${app === "terminal" ? "Terminal" : "CMD"}.`,
-                        ``,
-                        `Host: ${live.name} · IP: ${eth?.ip ?? "(n/d)"}`,
-                        `help | ipconfig | ping | nslookup | ftp | ntp sync`,
-                        ``,
-                      ]}
+                      key={`${hostOs}-${app}`}
+                      prompt={
+                        isLinux
+                          ? `studente@${live.name}:~$`
+                          : `C:\\Users\\Studente>`
+                      }
+                      accent={isLinux ? "#a8e6a3" : "#f0f0f0"}
+                      background={isLinux ? "#1e1e1e" : "#0c0c0c"}
+                      welcome={
+                        isLinux
+                          ? [
+                              `NetLab Linux ${live.name} 6.8.0-netlab`,
+                              `Welcome to bash — digita help per i comandi.`,
+                              ``,
+                              `Host: ${live.name} · IP: ${eth?.ip ?? "(n/d)"}`,
+                              `ip addr | dhclient | ping | dig | curl | ftp`,
+                              ``,
+                            ]
+                          : [
+                              `Microsoft Windows [Versione NetLab 10.0]`,
+                              `(c) NetLab — ${app === "terminal" ? "Terminal" : "CMD"}.`,
+                              ``,
+                              `Host: ${live.name} · IP: ${eth?.ip ?? "(n/d)"}`,
+                              `help | ipconfig | ping | nslookup | ftp | ntp sync`,
+                              ``,
+                            ]
+                      }
                       onCommand={(line) => runPcCommand(line, makeCtx())}
                     />
                   </div>
@@ -399,8 +483,9 @@ export function WindowsDesktop({
             </button>
             {app && (
               <div className="truncate rounded bg-slate-800 px-3 py-1 text-xs text-slate-200">
-                {SHORTCUTS.find((s) => s.id === app)?.label ??
-                  (app === "stub" ? stubName : app)}
+                {(isLinux ? SHORTCUTS_LINUX : SHORTCUTS_WIN).find(
+                  (s) => s.id === app,
+                )?.label ?? (app === "stub" ? stubName : app)}
               </div>
             )}
             <div className="ml-auto flex items-center gap-1 pr-1">

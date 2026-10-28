@@ -23,7 +23,13 @@ import {
 } from "./services";
 import { authenticateAaa } from "./aaa";
 import { syncNtp } from "./telemetry";
-import type { CommandResult, LabState, StaticRoute, VlanRecord } from "./types";
+import {
+  getHostOs,
+  type CommandResult,
+  type LabState,
+  type StaticRoute,
+  type VlanRecord,
+} from "./types";
 
 type FtpSession = {
   serverId: string;
@@ -67,7 +73,126 @@ function helpPc(): string {
     "  nslookup www.lab",
     "  ping server.lab",
     "  http www.lab",
+    "",
+    "OS: Desktop → selettore Windows | Linux per passare a bash.",
   ].join("\n");
+}
+
+function helpLinux(): string {
+  return [
+    "Comandi disponibili (stile bash / Linux):",
+    "  ip addr | ip a | ifconfig     Mostra interfacce",
+    "  ip addr add <ip>/<cidr> [gw <gateway>]",
+    "                                IP statico (es. 192.168.1.10/24 gw 192.168.1.1)",
+    "  ifconfig <iface> <ip> netmask <mask> [gw <gateway>]",
+    "  dhclient | dhclient -r        DHCP renew / release",
+    "  ping <ip|nome>                ICMP",
+    "  nslookup | dig <nome>         Query DNS",
+    "  curl | wget <host>            GET HTTP su Server-PT",
+    "  ftp <host>                    Sessione FTP",
+    "  ntpdate | chronyc sync        Sincronizza NTP",
+    "  ls | rm <file>                File locali (simulati)",
+    "  ip neigh | arp -a             Cache ARP",
+    "  ip route | route -n           Tabella di routing",
+    "  ss | netstat                  Socket (demo)",
+    "  hostname | uname -a           Identità host",
+    "  clear | help | man            Schermo / aiuto",
+    "",
+    "Esempio:",
+    "  dhclient",
+    "  ip addr add 192.168.1.20/24 gw 192.168.1.1",
+    "  ping server.lab",
+    "  curl www.lab",
+    "",
+    "OS: Desktop → selettore Windows | Linux per tornare a CMD.",
+  ].join("\n");
+}
+
+function ifconfigLinux(state: LabState, deviceId: string): string {
+  const device = getDevice(state, deviceId);
+  if (!device) return "Errore: dispositivo non trovato.";
+  const lines: string[] = [];
+  let idx = 0;
+  for (const iface of device.interfaces) {
+    if (iface.parentIfaceId) continue;
+    const name =
+      iface.media === "wireless"
+        ? `wlan${idx}`
+        : iface.media === "fiber"
+          ? `ens${idx}`
+          : `eth${idx}`;
+    idx++;
+    const cidr =
+      iface.ip && iface.mask ? maskToCidr(iface.mask) : null;
+    const flags = [
+      "UP",
+      iface.connectedLinkId ? "LOWER_UP" : "NO-CARRIER",
+      "BROADCAST",
+      "MULTICAST",
+    ].join(",");
+    lines.push(`${name}: flags=${iface.enabled ? "4163" : "0"}<${flags}>  mtu 1500`);
+    if (iface.ip) {
+      lines.push(
+        `        inet ${iface.ip}${cidr != null ? `/${cidr}` : ""}  netmask ${iface.mask ?? "?"}  broadcast -`,
+      );
+    } else {
+      lines.push(`        inet (non configurato)`);
+    }
+    if (iface.gateway) {
+      lines.push(`        gateway ${iface.gateway}`);
+    }
+    lines.push(`        ether ${iface.mac}  txqueuelen 1000`);
+    lines.push(
+      `        ${iface.name} · link ${iface.connectedLinkId ? "UP" : "DOWN"}`,
+    );
+    lines.push("");
+  }
+  if (lines.length === 0) lines.push("(nessuna interfaccia)");
+  return lines.join("\n");
+}
+
+function linuxRoute(state: LabState, deviceId: string): string {
+  const device = getDevice(state, deviceId);
+  if (!device) return "Errore: dispositivo non trovato.";
+  const lines = [
+    "Kernel IP routing table",
+    "Destination     Gateway         Genmask         Flags Metric Ref    Use Iface",
+  ];
+  let n = 0;
+  let ethIdx = 0;
+  for (const iface of device.interfaces) {
+    if (iface.parentIfaceId) continue;
+    const ifName =
+      iface.media === "wireless" ? `wlan${ethIdx}` : `eth${ethIdx}`;
+    ethIdx++;
+    if (!iface.ip || !iface.mask) continue;
+    const ip = parseIp(iface.ip);
+    const mask = parseMask(iface.mask);
+    if (ip === null || mask === null) continue;
+    const net = formatIp((ip & mask) >>> 0);
+    lines.push(
+      `${net.padEnd(16)}${"0.0.0.0".padEnd(16)}${iface.mask.padEnd(16)}U     0      0        0 ${ifName}`,
+    );
+    n++;
+    if (iface.gateway) {
+      lines.push(
+        `${"0.0.0.0".padEnd(16)}${iface.gateway.padEnd(16)}${"0.0.0.0".padEnd(16)}UG    0      0        0 ${ifName}`,
+      );
+      n++;
+    }
+  }
+  if (n === 0) lines.push("(empty — configura un IP)");
+  return lines.join("\n");
+}
+
+function parseCidrIp(token: string): { ip: string; mask: string } | null {
+  const m = token.match(/^(\d+\.\d+\.\d+\.\d+)\/(\d{1,2})$/);
+  if (!m) return null;
+  const ip = m[1];
+  const bits = Number(m[2]);
+  if (!isValidIp(ip) || bits < 0 || bits > 32) return null;
+  const maskNum = bits === 0 ? 0 : (0xffffffff << (32 - bits)) >>> 0;
+  return { ip, mask: formatIp(maskNum) };
 }
 
 function helpRouter(): string {
@@ -294,10 +419,271 @@ function routePrint(state: LabState, deviceId: string): string {
   return lines.join("\n");
 }
 
+export function runLinuxCommand(
+  raw: string,
+  ctx: CommandContext,
+): CommandResult {
+  const line = raw.trim();
+  if (!line) return { output: "" };
+
+  const lower = line.toLowerCase();
+  const parts = line.split(/\s+/);
+
+  if (lower === "help" || lower === "man" || lower === "?") {
+    return { output: helpLinux() };
+  }
+  if (lower === "clear" || lower === "cls") return { output: "", clear: true };
+
+  if (lower === "hostname") {
+    const d = getDevice(ctx.state, ctx.deviceId);
+    return { output: d?.name ?? "" };
+  }
+  if (lower === "uname" || lower === "uname -a") {
+    const d = getDevice(ctx.state, ctx.deviceId);
+    return {
+      output: `Linux ${d?.name ?? "netlab"} 6.8.0-netlab #1 SMP PREEMPT_DYNAMIC x86_64 GNU/Linux`,
+    };
+  }
+  if (lower === "whoami") return { output: "studente" };
+  if (lower === "pwd") return { output: "/home/studente" };
+
+  if (
+    lower === "ip addr" ||
+    lower === "ip a" ||
+    lower === "ip address" ||
+    lower === "ifconfig" ||
+    lower === "ip link"
+  ) {
+    return { output: ifconfigLinux(ctx.state, ctx.deviceId) };
+  }
+
+  if (lower.startsWith("ip addr add ") || lower.startsWith("ip address add ")) {
+    const tokens = parts.slice(3);
+    const cidrTok = tokens[0];
+    const parsed = cidrTok ? parseCidrIp(cidrTok) : null;
+    if (!parsed) {
+      return {
+        output:
+          "Uso: ip addr add <ip>/<cidr> [gw <gateway>]\nEsempio: ip addr add 192.168.1.10/24 gw 192.168.1.1",
+      };
+    }
+    let gw: string | undefined;
+    const gi = tokens.findIndex((t) => t.toLowerCase() === "gw" || t.toLowerCase() === "via");
+    if (gi >= 0 && tokens[gi + 1]) gw = tokens[gi + 1];
+    return { output: setIp(ctx, parsed.ip, parsed.mask, gw) };
+  }
+
+  if (lower.startsWith("ifconfig ") && parts.length >= 3) {
+    // ifconfig eth0 192.168.1.10 netmask 255.255.255.0 [gw 192.168.1.1]
+    const ipTok = parts.find((p) => /^\d+\.\d+\.\d+\.\d+$/.test(p));
+    const nmIdx = parts.findIndex((p) => p.toLowerCase() === "netmask");
+    const mask = nmIdx >= 0 ? parts[nmIdx + 1] : undefined;
+    const gwIdx = parts.findIndex(
+      (p) => p.toLowerCase() === "gw" || p.toLowerCase() === "gateway",
+    );
+    const gw = gwIdx >= 0 ? parts[gwIdx + 1] : undefined;
+    if (!ipTok || !mask) {
+      return {
+        output:
+          "Uso: ifconfig <iface> <ip> netmask <mask> [gw <gateway>]\nEsempio: ifconfig eth0 192.168.1.10 netmask 255.255.255.0 gw 192.168.1.1",
+      };
+    }
+    return { output: setIp(ctx, ipTok, mask, gw) };
+  }
+
+  if (
+    lower === "dhclient" ||
+    lower === "dhclient eth0" ||
+    lower === "sudo dhclient" ||
+    lower === "dhcp" ||
+    lower === "dhclient -v"
+  ) {
+    const device = getDevice(ctx.state, ctx.deviceId);
+    const iface = device ? preferredHostIface(device) : undefined;
+    if (!iface) return { output: "Nessuna interfaccia." };
+    const res = requestDhcp(ctx.state, ctx.deviceId, iface.id);
+    ctx.setState(res.state);
+    return { output: res.message };
+  }
+
+  if (
+    lower === "dhclient -r" ||
+    lower === "dhclient -r eth0" ||
+    lower === "sudo dhclient -r"
+  ) {
+    const device = getDevice(ctx.state, ctx.deviceId);
+    const iface = device ? preferredHostIface(device) : undefined;
+    if (!iface) return { output: "Nessuna interfaccia." };
+    const res = releaseDhcp(ctx.state, ctx.deviceId, iface.id);
+    ctx.setState(res.state);
+    return { output: res.message };
+  }
+
+  if (lower.startsWith("ping ")) {
+    const target = parts[1];
+    if (!target) return { output: "Uso: ping <indirizzo|nome>" };
+    const { result, state } = runPing(ctx.state, ctx.deviceId, target);
+    ctx.setState(state);
+    return { output: result.message };
+  }
+
+  if (
+    lower.startsWith("curl ") ||
+    lower.startsWith("wget ") ||
+    lower.startsWith("http ")
+  ) {
+    const target = parts[1]?.replace(/^https?:\/\//, "");
+    if (!target) return { output: "Uso: curl <host|ip>" };
+    const probe = fetchHttp(ctx.state, ctx.deviceId, target);
+    const dest = probe.destIp ?? target;
+    const { result, state } = runPing(ctx.state, ctx.deviceId, dest);
+    ctx.setState(state);
+    if (!result.ok) {
+      return {
+        output: `curl: (7) Failed to connect to ${target}\n${result.message.split("\n")[0]}`,
+      };
+    }
+    const res = fetchHttp(state, ctx.deviceId, target, { reachable: true });
+    return { output: res.output };
+  }
+
+  if (lower.startsWith("nslookup ") || lower.startsWith("dig ")) {
+    const name = parts[1];
+    if (!name) return { output: "Uso: nslookup <nome>  oppure  dig <nome>" };
+    const device = getDevice(ctx.state, ctx.deviceId);
+    const dns =
+      device?.interfaces.find((i) => i.dnsServers.length)?.dnsServers[0] ??
+      "???";
+    const { ip, state } = resolveDnsQuery(ctx.state, ctx.deviceId, name);
+    ctx.setState(state);
+    if (lower.startsWith("dig ")) {
+      if (!ip) {
+        return {
+          output: [
+            `; <<>> DiG NetLab <<>> ${name}`,
+            `;; Got answer:`,
+            `;; ->>HEADER<<- opcode: QUERY, status: NXDOMAIN`,
+            `;; SERVER: ${dns}`,
+          ].join("\n"),
+        };
+      }
+      return {
+        output: [
+          `; <<>> DiG NetLab <<>> ${name}`,
+          `;; QUESTION SECTION:`,
+          `;${name}.\t\tIN\tA`,
+          ``,
+          `;; ANSWER SECTION:`,
+          `${name}.\t\t300\tIN\tA\t${ip}`,
+          ``,
+          `;; SERVER: ${dns}`,
+        ].join("\n"),
+      };
+    }
+    if (!ip) {
+      return {
+        output: [
+          `Server:\t\t${dns}`,
+          `Address:\t${dns}#53`,
+          ``,
+          `** server can't find ${name}: NXDOMAIN`,
+        ].join("\n"),
+      };
+    }
+    return {
+      output: [
+        `Server:\t\t${dns}`,
+        `Address:\t${dns}#53`,
+        ``,
+        `Name:\t${name}`,
+        `Address: ${ip}`,
+      ].join("\n"),
+    };
+  }
+
+  const ftpSession = ftpSessions.get(ctx.deviceId);
+  if (ftpSession) {
+    return handleFtpSession(raw, ctx, ftpSession);
+  }
+
+  if (lower.startsWith("ftp ")) {
+    const target = parts[1];
+    if (!target) return { output: "Uso: ftp <host|ip>" };
+    return startFtpSession(ctx, target);
+  }
+
+  if (
+    lower === "ntpdate" ||
+    lower === "ntp sync" ||
+    lower === "chronyc sync" ||
+    lower === "timedatectl sync"
+  ) {
+    const res = syncNtp(ctx.state, ctx.deviceId);
+    ctx.setState(res.state);
+    return { output: res.message };
+  }
+
+  if (lower === "ls" || lower === "ls -la" || lower === "ls -l") {
+    return {
+      output: [
+        "total 4",
+        "drwxr-xr-x 2 studente studente 4096 Jan  1 12:00 .",
+        "drwxr-xr-x 3 root     root     4096 Jan  1 12:00 ..",
+        "-rw-r--r-- 1 studente studente   48 Jan  1 12:00 readme.txt",
+      ].join("\n"),
+    };
+  }
+
+  if (lower.startsWith("rm ") || lower.startsWith("rm -f ")) {
+    const file = parts[parts.length - 1];
+    if (!file || file.startsWith("-")) return { output: "Uso: rm <file>" };
+    return { output: "" };
+  }
+
+  if (lower === "ss" || lower === "ss -tuln" || lower === "netstat" || lower === "netstat -tuln") {
+    return {
+      output: [
+        "Netid  State   Recv-Q  Send-Q  Local Address:Port  Peer Address:Port",
+        "tcp    LISTEN  0       0       0.0.0.0:*          0.0.0.0:*",
+      ].join("\n"),
+    };
+  }
+
+  if (lower === "arp -a" || lower === "arp" || lower === "ip neigh" || lower === "ip n") {
+    return { output: arpTable(ctx) };
+  }
+
+  if (
+    lower === "ip route" ||
+    lower === "ip r" ||
+    lower === "route" ||
+    lower === "route -n"
+  ) {
+    return { output: linuxRoute(ctx.state, ctx.deviceId) };
+  }
+
+  if (lower.startsWith("ipconfig")) {
+    return {
+      output:
+        "bash: ipconfig: command not found\n(Questo host è Linux — usa `ip addr` / `ifconfig`, oppure passa a Windows dal Desktop.)",
+    };
+  }
+
+  return {
+    output: `bash: ${parts[0]}: command not found\nDigita help per l'elenco comandi.`,
+  };
+}
+
+/** Shell end-host: Windows CMD o Linux bash in base a `device.hostOs`. */
 export function runPcCommand(
   raw: string,
   ctx: CommandContext,
 ): CommandResult {
+  const device = getDevice(ctx.state, ctx.deviceId);
+  if (device && getHostOs(device) === "linux") {
+    return runLinuxCommand(raw, ctx);
+  }
+
   const line = raw.trim();
   if (!line) return { output: "" };
 
@@ -450,6 +836,17 @@ export function runPcCommand(
 
   if (lower === "route print" || lower === "route") {
     return { output: routePrint(ctx.state, ctx.deviceId) };
+  }
+
+  if (
+    lower.startsWith("ip addr") ||
+    lower === "ifconfig" ||
+    lower.startsWith("dhclient")
+  ) {
+    return {
+      output:
+        `'${parts[0]}' non è riconosciuto come comando interno o esterno.\n(Questo host è Windows — usa ipconfig, oppure passa a Linux dal Desktop.)`,
+    };
   }
 
   return {

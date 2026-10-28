@@ -182,6 +182,9 @@ export type WifiRadio = {
   band: "2.4" | "5";
 };
 
+/** OS del Desktop end-host (PC / Laptop / Server) */
+export type HostOs = "windows" | "linux";
+
 export type Device = {
   id: string;
   type: DeviceKind;
@@ -189,6 +192,8 @@ export type Device = {
   x: number;
   y: number;
   interfaces: InterfaceConfig[];
+  /** Desktop: Windows CMD o shell Linux (default windows) */
+  hostOs?: HostOs;
   osSlot?: string;
   /** Defined VLANs on managed switches (VLAN 1 always exists) */
   vlans?: VlanRecord[];
@@ -579,6 +584,10 @@ export function defaultVlans(): VlanRecord[] {
     { id: 1004, name: "fddinet-default" },
     { id: 1005, name: "trnet-default" },
   ];
+}
+
+export function getHostOs(device: Pick<Device, "hostOs">): HostOs {
+  return device.hostOs ?? "windows";
 }
 
 export function isL3Device(type: DeviceKind): boolean {
