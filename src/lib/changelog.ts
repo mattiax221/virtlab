@@ -300,7 +300,7 @@ export const releases: ChangelogEntry[] = [
     detail: "SVG coerenti e tipografia più leggibile sulla griglia shortcut.",
   },
   {
-    sha: "pending",
+    sha: "2e3418d",
     date: "2026-10-28",
     title: "Roadmap ambiziosa (pensa in grande)",
     detail:
