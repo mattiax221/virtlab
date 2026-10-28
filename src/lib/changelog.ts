@@ -255,6 +255,13 @@ export const releases: ChangelogEntry[] = [
     detail:
       "Enable con RADIUS; STP semplificato + MAC unicast; PPPoE/VPN Desktop; header/desktop touch-friendly.",
   },
+  {
+    sha: "340a8cb",
+    date: "2026-10-28",
+    title: "Desktop PT shortcuts + Remote Desktop",
+    detail:
+      "Griglia shortcut stile Packet Tracer (niente «Questo PC»); Remote Desktop verso altri PC/Server; stub per MIB/Firewall/VoIP.",
+  },
 ];
 
 /** Roadmap / cose da fare (aggiornare quando si completa un item). */
