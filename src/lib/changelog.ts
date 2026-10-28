@@ -222,7 +222,7 @@ export const releases: ChangelogEntry[] = [
       "Utility Desktop PT: Web Browser e Text Editor; CMD con nslookup, ftp, dir, delete, netstat.",
   },
   {
-    sha: "pending",
+    sha: "f3e4b79",
     date: "2026-10-28",
     title: "Pagina Changelog + roadmap",
     detail:
