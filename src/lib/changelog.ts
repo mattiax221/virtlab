@@ -342,7 +342,7 @@ export const releases: ChangelogEntry[] = [
       "Job LPR con PDU PRINT sulla topologia; Desktop → Printers; pulse sulla stampante.",
   },
   {
-    sha: "pending",
+    sha: "34ae333",
     date: "2026-10-28",
     title: "RDP UX + drag + MIB Browser",
     detail:
