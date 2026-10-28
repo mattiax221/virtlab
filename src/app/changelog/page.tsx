@@ -177,8 +177,8 @@ export default function ChangelogPage() {
         </section>
 
         <p className="mt-12 border-t border-slate-800 pt-6 text-xs text-slate-500">
-          Aggiorna roadmap e release in{" "}
-          <code className="text-slate-400">src/lib/changelog.ts</code>.
+          Ogni rilascio aggiorna questa pagina insieme al codice su GitHub e
+          Vercel.
         </p>
       </div>
     </div>

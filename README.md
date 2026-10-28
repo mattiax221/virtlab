@@ -43,3 +43,11 @@ npm run dev
 Lab: [http://127.0.0.1:43127/lab](http://127.0.0.1:43127/lab)
 
 Gateway opzionale (stesso origine): `npm run gateway` → porta 43130.
+
+## Pubblicazione (GitHub + Vercel)
+
+1. **GitHub** (repo pubblico): push del branch `main`.
+2. **Vercel**: Import del repo → Framework Next.js → Deploy.
+3. **Changelog**: ogni rilascio aggiorna `/changelog` (lista release + roadmap).
+
+Dopo ogni update: codice su GitHub → redeploy Vercel → voce in changelog.

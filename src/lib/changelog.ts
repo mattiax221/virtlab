@@ -1,6 +1,5 @@
 /**
- * Changelog e roadmap NetLab (italiano).
- * Aggiornare a ogni commit rilevante: appendi in fondo a `releases`.
+ * Changelog e roadmap NetLab (italiano) — mostrati in /changelog.
  */
 
 export type ChangelogEntry = {
@@ -350,10 +349,7 @@ export const releases: ChangelogEntry[] = [
   },
 ];
 
-/**
- * Roadmap NetLab — pensata come Packet Tracer didattico nel browser.
- * Aggiornare status/horizon quando si completa o si riprioritizza.
- */
+/** Roadmap NetLab — Packet Tracer didattico nel browser. */
 export const todos: TodoItem[] = [
   // —— Completato (base già in lab) ——
   {

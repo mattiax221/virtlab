@@ -186,15 +186,11 @@ export default function ComandiPage() {
         </div>
 
         <p className="mt-14 border-t border-slate-800 pt-6 text-xs text-slate-500">
-          Fonte: implementazione in{" "}
-          <code className="text-slate-400">src/lib/network/commands.ts</code> ·
-          docs in{" "}
-          <code className="text-slate-400">src/lib/command-docs.ts</code>. Apri
-          il{" "}
+          Prova i comandi nel{" "}
           <Link href="/lab" className="text-sky-400 hover:underline">
             laboratorio
-          </Link>{" "}
-          per provarli.
+          </Link>
+          .
         </p>
       </div>
     </div>
