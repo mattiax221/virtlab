@@ -64,7 +64,9 @@ export function buildPingSimulation(
   const { result, state: afterPing } = runPing(next, fromDeviceId, dest);
   next = afterPing;
   const hops = result.hops;
-  const path = hopsToPath(next, hops);
+  const path = hopsToPath(next, hops, {
+    allowWireless: sourceUsesWireless(next, fromDeviceId, dest),
+  });
 
   if (path.length >= 2) {
     packets.push({
@@ -256,7 +258,9 @@ export function buildHttpSimulation(
 
   const { result, state: afterPing } = runPing(next, fromDeviceId, destIp);
   next = afterPing;
-  const path = hopsToPath(next, result.hops);
+  const path = hopsToPath(next, result.hops, {
+    allowWireless: sourceUsesWireless(next, fromDeviceId, destIp),
+  });
 
   if (path.length >= 2) {
     packets.push({
@@ -341,12 +345,25 @@ export function buildPrintSimulation(
   const printed = sendPrintJob(next, fromDeviceId, dest);
   next = printed.state;
 
-  const { result } = runPing(state, fromDeviceId, dest);
-  // Prefer hops from a fresh reachability path on the post-print topology
-  const reach = runPing(next, fromDeviceId, dest);
-  const path = hopsToPath(next, reach.result.hops.length ? reach.result.hops : result.hops);
   const printerId =
-    printed.printerId ?? path[path.length - 1]?.deviceId ?? null;
+    printed.printerId ??
+    next.devices.find(
+      (d) =>
+        d.type === "printer" && d.interfaces.some((i) => i.ip === dest),
+    )?.id ??
+    null;
+
+  // Percorso lungo i cavi (BFS). Wi‑Fi solo se la NIC usata dal PC è wireless.
+  const allowWireless = sourceUsesWireless(next, fromDeviceId, dest);
+  let path =
+    printerId != null
+      ? cablePathBetween(next, fromDeviceId, printerId, { allowWireless })
+      : devicePoint(next, fromDeviceId);
+  // Fallback: espandi gli hop del ping (inserisce comunque gli switch sul cavo)
+  if (path.length < 2) {
+    const reach = runPing(next, fromDeviceId, dest);
+    path = hopsToPath(reach.state, reach.result.hops, { allowWireless });
+  }
 
   if (path.length >= 2) {
     packets.push({
@@ -358,7 +375,9 @@ export function buildPrintSimulation(
       hops: path.slice(0, 2),
       hopIndex: 0,
       ok: printed.ok,
-      detail: `ARP for ${dest}`,
+      detail: allowWireless
+        ? `ARP (Wi‑Fi) for ${dest}`
+        : `ARP via cavo → ${path[1]?.label ?? "peer"}`,
     });
   }
 
@@ -372,7 +391,8 @@ export function buildPrintSimulation(
     hopIndex: 0,
     ok: printed.ok,
     detail: printed.ok
-      ? `Job ${printed.job?.id ?? ""} → ${printed.job?.pages ?? "?"} pg @ ${dest}`
+      ? `Job ${printed.job?.id ?? ""} → ${printed.job?.pages ?? "?"} pg @ ${dest}` +
+        (allowWireless ? " [Wi‑Fi]" : " [cablato]")
       : printed.message.split("\n")[0],
   });
 
@@ -453,58 +473,174 @@ function findDnsServerId(
   return srv?.id ?? null;
 }
 
-function devicePoint(
-  state: LabState,
-  id: string,
-): { deviceId: string; x: number; y: number; label: string }[] {
+type PathNode = {
+  deviceId: string;
+  x: number;
+  y: number;
+  label: string;
+};
+
+function devicePoint(state: LabState, id: string): PathNode[] {
   const d = getDevice(state, id);
   if (!d) return [];
   return [{ deviceId: id, x: d.x, y: d.y, label: d.name }];
+}
+
+/**
+ * BFS lungo i link reali. Di default esclude i link wireless
+ * (animazione “via cavo”: PC → switch → stampante).
+ */
+function cablePathBetween(
+  state: LabState,
+  fromId: string,
+  toId: string | null,
+  opts?: { allowWireless?: boolean },
+): PathNode[] {
+  const from = getDevice(state, fromId);
+  if (!from) return [];
+  if (!toId) return devicePoint(state, fromId);
+  const to = getDevice(state, toId);
+  if (!to) return devicePoint(state, fromId);
+  if (fromId === toId) return devicePoint(state, fromId);
+
+  const allowWireless = opts?.allowWireless ?? false;
+  const prev = new Map<string, string | null>();
+  prev.set(fromId, null);
+  const queue: string[] = [fromId];
+
+  while (queue.length > 0) {
+    const cur = queue.shift()!;
+    if (cur === toId) break;
+    for (const link of state.links) {
+      if (link.aDeviceId !== cur && link.bDeviceId !== cur) continue;
+      const other = link.aDeviceId === cur ? link.bDeviceId : link.aDeviceId;
+      if (prev.has(other)) continue;
+
+      const isWifiLink =
+        link.media === "wireless" ||
+        (() => {
+          const a = getDevice(state, link.aDeviceId);
+          const b = getDevice(state, link.bDeviceId);
+          const aIf = a?.interfaces.find((i) => i.id === link.aIfaceId);
+          const bIf = b?.interfaces.find((i) => i.id === link.bIfaceId);
+          return aIf?.media === "wireless" || bIf?.media === "wireless";
+        })();
+      if (isWifiLink && !allowWireless) continue;
+
+      const peer = getDevice(state, other);
+      if (peer && !peer.powered) continue;
+
+      prev.set(other, cur);
+      queue.push(other);
+    }
+  }
+
+  if (!prev.has(toId)) {
+    // Nessun percorso cablato: non inventare una linea diretta “wireless”
+    return devicePoint(state, fromId);
+  }
+
+  const ids: string[] = [];
+  let walk: string | null = toId;
+  while (walk) {
+    ids.push(walk);
+    walk = prev.get(walk) ?? null;
+  }
+  ids.reverse();
+  return ids.map((id) => {
+    const d = getDevice(state, id)!;
+    return { deviceId: id, x: d.x, y: d.y, label: d.name };
+  });
+}
+
+/** True se la sorgente raggiunge `destIp` dalla NIC Wi‑Fi (non Ethernet). */
+function sourceUsesWireless(
+  state: LabState,
+  fromDeviceId: string,
+  destIp: string,
+): boolean {
+  const from = getDevice(state, fromDeviceId);
+  if (!from) return false;
+  // Preferisci Ethernet cablata se ha IP e cavo
+  const eth = from.interfaces.find(
+    (i) =>
+      !i.parentIfaceId &&
+      i.enabled &&
+      i.ip &&
+      i.connectedLinkId &&
+      (i.media === "ethernet" || i.media === "fiber"),
+  );
+  if (eth) return false;
+  const wifi = from.interfaces.find(
+    (i) =>
+      !i.parentIfaceId &&
+      i.enabled &&
+      i.ip &&
+      i.media === "wireless" &&
+      i.connectedLinkId,
+  );
+  if (!wifi) return false;
+  // Se l’unica NIC con IP verso quella rete è Wi‑Fi
+  void destIp;
+  return true;
 }
 
 function pathBetween(
   state: LabState,
   fromId: string,
   toId: string | null,
-): { deviceId: string; x: number; y: number; label: string }[] {
-  const from = getDevice(state, fromId);
-  if (!from) return [];
-  if (!toId) return devicePoint(state, fromId);
-  const to = getDevice(state, toId);
-  if (!to) return devicePoint(state, fromId);
-  // Path semplificato: source → eventuali switch in comune → dest
-  const mid: { deviceId: string; x: number; y: number; label: string }[] = [];
-  for (const link of state.links) {
-    const touchesFrom =
-      link.aDeviceId === fromId || link.bDeviceId === fromId;
-    if (!touchesFrom) continue;
-    const other =
-      link.aDeviceId === fromId ? link.bDeviceId : link.aDeviceId;
-    if (other === toId) continue;
-    const od = getDevice(state, other);
-    if (od && (od.type.startsWith("switch") || od.type === "hub")) {
-      mid.push({ deviceId: od.id, x: od.x, y: od.y, label: od.name });
-      break;
-    }
-  }
-  return [
-    { deviceId: from.id, x: from.x, y: from.y, label: from.name },
-    ...mid,
-    { deviceId: to.id, x: to.x, y: to.y, label: to.name },
-  ];
+  opts?: { allowWireless?: boolean },
+): PathNode[] {
+  return cablePathBetween(state, fromId, toId, opts);
 }
 
+/**
+ * Espande gli hop L3 (PC → stampante) inserendo switch/hub lungo i cavi.
+ */
 function hopsToPath(
   state: LabState,
   hops: PingHop[],
-): { deviceId: string; x: number; y: number; label: string }[] {
-  return hops.map((h) => {
-    const d = getDevice(state, h.deviceId);
-    return {
-      deviceId: h.deviceId,
-      x: d?.x ?? 0,
-      y: d?.y ?? 0,
-      label: `${h.deviceName}\n${h.ip}`,
-    };
-  });
+  opts?: { allowWireless?: boolean },
+): PathNode[] {
+  if (hops.length === 0) return [];
+  if (hops.length === 1) {
+    const d = getDevice(state, hops[0].deviceId);
+    return d
+      ? [
+          {
+            deviceId: d.id,
+            x: d.x,
+            y: d.y,
+            label: `${hops[0].deviceName}\n${hops[0].ip}`,
+          },
+        ]
+      : [];
+  }
+
+  const allowWireless = opts?.allowWireless ?? false;
+  const full: PathNode[] = [];
+  for (let i = 0; i < hops.length - 1; i++) {
+    const segment = cablePathBetween(
+      state,
+      hops[i].deviceId,
+      hops[i + 1].deviceId,
+      { allowWireless },
+    );
+    if (segment.length === 0) continue;
+    if (full.length > 0) segment.shift();
+    // etichetta IP sugli estremi L3
+    if (segment.length) {
+      segment[0] = {
+        ...segment[0],
+        label: `${hops[i].deviceName}\n${hops[i].ip}`,
+      };
+      const last = segment[segment.length - 1];
+      segment[segment.length - 1] = {
+        ...last,
+        label: `${hops[i + 1].deviceName}\n${hops[i + 1].ip}`,
+      };
+    }
+    full.push(...segment);
+  }
+  return full;
 }
