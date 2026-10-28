@@ -2,11 +2,20 @@
 
 import { useEffect, useState } from "react";
 import {
+  initialRouterCli,
+  routerPrompt,
   runPcCommand,
+  runRouterCommand,
   type CommandContext,
+  type RouterCliState,
 } from "@/lib/network/commands";
 import { runPing } from "@/lib/network/engine";
-import type { Device, LabState } from "@/lib/network/types";
+import {
+  isL3Device,
+  isManagedSwitch,
+  type Device,
+  type LabState,
+} from "@/lib/network/types";
 import type { SimPacket } from "@/lib/network/simulation";
 import { EmailClient } from "./EmailClient";
 import { NetworkConnections } from "./NetworkConnections";
@@ -744,29 +753,55 @@ function SshClientPanel({
   onClose: () => void;
 }) {
   const [host, setHost] = useState("192.168.1.1");
-  const [log, setLog] = useState<string[]>([
-    "Telnet / SSH Client (NetLab)",
-    "Digita un IP e Connect — verifica raggiungibilità con ping.",
-  ]);
+  const [status, setStatus] = useState(
+    "Inserisci l’IP di un router/switch e Connect.",
+  );
+  const [session, setSession] = useState<{
+    target: Device;
+    cli: RouterCliState;
+  } | null>(null);
 
   function connect() {
-    const { result, state } = runPing(stateRef.current, device.id, host.trim());
+    const dest = host.trim();
+    const { result, state } = runPing(stateRef.current, device.id, dest);
     stateRef.current = state;
     setState(state);
+    if (!result.ok) {
+      setStatus(`Connessione fallita — ${result.message.split("\n")[0]}`);
+      setSession(null);
+      return;
+    }
     const target = state.devices.find((d) =>
-      d.interfaces.some((i) => i.ip === host.trim()),
+      d.interfaces.some((i) => i.ip === dest),
     );
-    setLog((prev) => [
-      ...prev,
-      ``,
-      `> connect ${host}`,
-      result.ok
-        ? `Connected to ${target?.name ?? host}.`
-        : `Connection failed: ${result.message.split("\n")[0]}`,
-      result.ok
-        ? `(Apri il device dal canvas per la CLI completa router/switch.)`
-        : "",
-    ]);
+    if (!target) {
+      setStatus(`Nessun device con IP ${dest}.`);
+      setSession(null);
+      return;
+    }
+    if (!isL3Device(target.type) && !isManagedSwitch(target.type)) {
+      setStatus(
+        `${target.name} non ha CLI IOS (usa Remote Desktop per PC/Server).`,
+      );
+      setSession(null);
+      return;
+    }
+    setStatus(`SSH session → ${target.name} (${dest})`);
+    setSession({
+      target,
+      cli: initialRouterCli(target.name),
+    });
+  }
+
+  function makeRemoteCtx(): CommandContext {
+    return {
+      state: stateRef.current,
+      deviceId: session!.target.id,
+      setState: (next) => {
+        stateRef.current = next;
+        setState(next);
+      },
+    };
   }
 
   return (
@@ -774,24 +809,82 @@ function SshClientPanel({
       <PanelTitle dark onClose={onClose}>
         Telnet / SSH Client — {device.name}
       </PanelTitle>
-      <div className="flex items-center gap-2 border-b border-slate-700 bg-slate-900 px-2 py-1">
-        <input
-          className="min-w-0 flex-1 rounded border border-slate-600 bg-slate-950 px-2 py-1 font-mono text-[12px]"
-          value={host}
-          onChange={(e) => setHost(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && connect()}
-        />
-        <button
-          type="button"
-          className="rounded bg-sky-700 px-3 py-1 text-white hover:bg-sky-600"
-          onClick={connect}
-        >
-          Connect
-        </button>
-      </div>
-      <pre className="min-h-0 flex-1 overflow-auto p-3 font-mono text-[11px]">
-        {log.join("\n")}
-      </pre>
+      {!session ? (
+        <div className="space-y-3 p-4">
+          <div className="flex gap-2">
+            <input
+              className="min-w-0 flex-1 rounded border border-slate-600 bg-slate-950 px-2 py-1.5 font-mono text-[12px]"
+              value={host}
+              onChange={(e) => setHost(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && connect()}
+              placeholder="192.168.1.1"
+            />
+            <button
+              type="button"
+              className="rounded bg-sky-700 px-3 py-1.5 text-white hover:bg-sky-600"
+              onClick={connect}
+            >
+              Connect
+            </button>
+          </div>
+          <p className="text-[11px] text-slate-400">{status}</p>
+          <p className="text-[11px] text-slate-500">
+            Dopo Connect ottieni la CLI Cisco-like del device remoto (enable,
+            conf t, show…). Vedi{" "}
+            <a href="/comandi" className="text-sky-400 underline">
+              /comandi
+            </a>
+            .
+          </p>
+        </div>
+      ) : (
+        <>
+          <div className="flex items-center justify-between border-b border-slate-700 bg-slate-900 px-2 py-1 text-[11px] text-slate-300">
+            <span>
+              Connected: {session.target.name} · {status}
+            </span>
+            <button
+              type="button"
+              className="rounded px-2 py-0.5 hover:bg-rose-700"
+              onClick={() => {
+                setSession(null);
+                setStatus("Sessione chiusa.");
+              }}
+            >
+              Disconnect
+            </button>
+          </div>
+          <div className="min-h-0 flex-1">
+            <Terminal
+              prompt={routerPrompt(session.cli)}
+              accent="#f0f0f0"
+              background="#0c0c0c"
+              welcome={[
+                `SSH to ${session.target.name}`,
+                `User Access Verification`,
+                ``,
+                `Type help or ? for commands. Digita enable per privilegi.`,
+                ``,
+              ]}
+              onCommand={(line) => {
+                let nextCli = session.cli;
+                const res = runRouterCommand(
+                  line,
+                  makeRemoteCtx(),
+                  session.cli,
+                  (c) => {
+                    nextCli = c;
+                    setSession((s) => (s ? { ...s, cli: c } : s));
+                  },
+                );
+                // sync prompt after mode change
+                void nextCli;
+                return res;
+              }}
+            />
+          </div>
+        </>
+      )}
     </div>
   );
 }

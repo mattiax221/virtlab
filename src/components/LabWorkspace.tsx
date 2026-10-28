@@ -748,6 +748,13 @@ export function LabWorkspace() {
           Esercizi
         </a>
         <a
+          href="/comandi"
+          className="rounded px-2 py-1.5 text-[11px] text-slate-400 hover:bg-slate-800 hover:text-sky-300 touch-manipulation sm:py-1"
+          title="Riferimento comandi"
+        >
+          Comandi
+        </a>
+        <a
           href="/changelog"
           className="hidden rounded px-2 py-1 text-[11px] text-slate-400 hover:bg-slate-800 hover:text-sky-300 sm:inline"
           title="Cronologia e cose da fare"

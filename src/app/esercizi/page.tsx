@@ -65,6 +65,10 @@ export default function EserciziPage() {
             Laboratorio
           </Link>
           <span aria-hidden>·</span>
+          <Link href="/comandi" className="hover:text-sky-300">
+            Comandi
+          </Link>
+          <span aria-hidden>·</span>
           <Link href="/changelog" className="hover:text-sky-300">
             Changelog
           </Link>

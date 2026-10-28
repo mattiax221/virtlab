@@ -434,9 +434,18 @@ export const todos: TodoItem[] = [
     id: "ssh-real-cli",
     title: "Telnet/SSH → CLI del device remoto",
     detail:
-      "Dal client Desktop aprire davvero la console router/switch (non solo ping di raggiungibilità).",
-    status: "todo",
+      "Desktop Telnet/SSH apre la CLI Cisco-like del router/switch raggiungibile.",
+    status: "done",
     epic: "desktop",
+    horizon: "now",
+  },
+  {
+    id: "comandi-page",
+    title: "Pagina riferimento comandi",
+    detail:
+      "/comandi con filtro device e per ogni comando: a cosa serve / cosa non fa.",
+    status: "done",
+    epic: "pedagogy",
     horizon: "now",
   },
 
