@@ -321,7 +321,7 @@ export const releases: ChangelogEntry[] = [
       "Selettore OS sul Desktop: CMD Windows oppure bash (ip addr, dhclient, curl, dig…).",
   },
   {
-    sha: "pending",
+    sha: "31bdebb",
     date: "2026-10-28",
     title: "Tab autocomplete + Firewall host",
     detail:
