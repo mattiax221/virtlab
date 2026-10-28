@@ -29,6 +29,11 @@ export const COMMAND_SECTIONS: CmdSection[] = [
       "Desktop → selettore Windows → Command Prompt. CMD: IP, ping, DNS, HTTP, FTP, NTP. Puoi passare a Linux sullo stesso host.",
     commands: [
       {
+        cmd: "Tab (autocomplete)",
+        does: "Completa il comando o l’abbreviazione; se ambigua elenca i candidati.",
+        doesNot: "Non completa argomenti IP/nomi host liberi.",
+      },
+      {
         cmd: "help",
         does: "Elenca i comandi disponibili sul PC.",
         doesNot: "Non mostra man page estese né opzioni Windows reali.",

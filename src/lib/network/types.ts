@@ -244,6 +244,28 @@ export type Device = {
     username: string;
     virtualIp?: string;
   };
+  /** Firewall host (Desktop) — regole inbound/outbound semplificate */
+  hostFirewall?: HostFirewall;
+};
+
+export type HostFirewallRule = {
+  id: string;
+  enabled: boolean;
+  action: "allow" | "deny";
+  direction: "in" | "out";
+  proto: "any" | "icmp" | "tcp" | "udp";
+  /** Porta destinazione (tcp/udp); vuoto = any */
+  port?: number;
+  /** IP remoto (any se vuoto) */
+  remoteIp?: string;
+  description?: string;
+};
+
+export type HostFirewall = {
+  enabled: boolean;
+  /** Se true, traffico non matchato = deny (default allow) */
+  defaultDeny: boolean;
+  rules: HostFirewallRule[];
 };
 
 export type DhcpLease = {

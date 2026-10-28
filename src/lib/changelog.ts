@@ -320,6 +320,13 @@ export const releases: ChangelogEntry[] = [
     detail:
       "Selettore OS sul Desktop: CMD Windows oppure bash (ip addr, dhclient, curl, dig…).",
   },
+  {
+    sha: "pending",
+    date: "2026-10-28",
+    title: "Tab autocomplete + Firewall host",
+    detail:
+      "Tab completa comandi (CMD/bash/IOS); Desktop Firewall con regole su ping.",
+  },
 ];
 
 /**
@@ -439,8 +446,26 @@ export const todos: TodoItem[] = [
     id: "desktop-stubs-real",
     title: "Chiudere gli stub Desktop PT",
     detail:
-      "Firewall IPv4/IPv6 host ACL, MIB Browser (SNMP get/walk), Cisco IP Communicator (softphone base), Dial-up modem.",
-    status: "todo",
+      "Firewall host fatto; restano MIB Browser (SNMP), IP Communicator, Dial-up modem.",
+    status: "doing",
+    epic: "desktop",
+    horizon: "now",
+  },
+  {
+    id: "cli-tab-complete",
+    title: "Tab autocomplete CLI",
+    detail:
+      "Tab su CMD/bash/router/switch con abbreviazioni (sh→show) e lista candidati.",
+    status: "done",
+    epic: "desktop",
+    horizon: "now",
+  },
+  {
+    id: "host-firewall",
+    title: "Firewall Desktop host",
+    detail:
+      "Regole allow/deny in/out su ICMP (e porte TCP/UDP) applicate al ping.",
+    status: "done",
     epic: "desktop",
     horizon: "now",
   },

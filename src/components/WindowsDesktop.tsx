@@ -2,6 +2,13 @@
 
 import { useEffect, useState } from "react";
 import {
+  FTP_COMPLETIONS,
+  PC_LINUX_COMPLETIONS,
+  PC_WIN_COMPLETIONS,
+  iosCompletions,
+} from "@/lib/cli-complete";
+import {
+  hasFtpSession,
   initialRouterCli,
   routerPrompt,
   runPcCommand,
@@ -9,8 +16,7 @@ import {
   type CommandContext,
   type RouterCliState,
 } from "@/lib/network/commands";
-import { runPing } from "@/lib/network/engine";
-import { updateDevice } from "@/lib/network/engine";
+import { runPing, updateDevice } from "@/lib/network/engine";
 import {
   getHostOs,
   isL3Device,
@@ -21,6 +27,7 @@ import {
 } from "@/lib/network/types";
 import type { SimPacket } from "@/lib/network/simulation";
 import { EmailClient } from "./EmailClient";
+import { HostFirewallPanel } from "./HostFirewall";
 import { NetworkConnections } from "./NetworkConnections";
 import { PhysicalPanel } from "./PhysicalPanel";
 import { PppoeDialer } from "./PppoeDialer";
@@ -96,7 +103,7 @@ const SHORTCUTS_WIN: Shortcut[] = [
   { id: "editor", label: "Text Editor", icon: "editor" },
   { id: "rdp", label: "Remote Desktop", icon: "rdp" },
   { id: "ssh", label: "Telnet / SSH", icon: "ssh" },
-  { id: "firewall", label: "Firewall", icon: "firewall", stub: true },
+  { id: "firewall", label: "Firewall", icon: "firewall" },
   { id: "mib", label: "MIB Browser", icon: "mib", stub: true },
   { id: "voip", label: "IP Communicator", icon: "voip", stub: true },
   { id: "physical", label: "Physical", icon: "physical" },
@@ -115,7 +122,7 @@ const SHORTCUTS_LINUX: Shortcut[] = [
   { id: "editor", label: "Text Editor", icon: "editor" },
   { id: "rdp", label: "Remote Desktop", icon: "rdp" },
   { id: "ssh", label: "Telnet / SSH", icon: "ssh" },
-  { id: "firewall", label: "Firewall", icon: "firewall", stub: true },
+  { id: "firewall", label: "Firewall", icon: "firewall" },
   { id: "mib", label: "MIB Browser", icon: "mib", stub: true },
   { id: "voip", label: "IP Communicator", icon: "voip", stub: true },
   { id: "physical", label: "Physical", icon: "physical" },
@@ -342,6 +349,14 @@ export function WindowsDesktop({
                   onClose={() => setApp(null)}
                 />
               )}
+              {app === "firewall" && (
+                <HostFirewallPanel
+                  device={device}
+                  stateRef={stateRef}
+                  setState={setState}
+                  onClose={() => setApp(null)}
+                />
+              )}
               {(app === "cmd" || app === "terminal") && (
                 <>
                   <PanelTitle dark onClose={() => setApp(null)}>
@@ -365,7 +380,7 @@ export function WindowsDesktop({
                         isLinux
                           ? [
                               `NetLab Linux ${live.name} 6.8.0-netlab`,
-                              `Welcome to bash — digita help per i comandi.`,
+                              `Welcome to bash — digita help · Tab = completa.`,
                               ``,
                               `Host: ${live.name} · IP: ${eth?.ip ?? "(n/d)"}`,
                               `ip addr | dhclient | ping | dig | curl | ftp`,
@@ -373,12 +388,19 @@ export function WindowsDesktop({
                             ]
                           : [
                               `Microsoft Windows [Versione NetLab 10.0]`,
-                              `(c) NetLab — ${app === "terminal" ? "Terminal" : "CMD"}.`,
+                              `(c) NetLab — ${app === "terminal" ? "Terminal" : "CMD"} · Tab = completa.`,
                               ``,
                               `Host: ${live.name} · IP: ${eth?.ip ?? "(n/d)"}`,
                               `help | ipconfig | ping | nslookup | ftp | ntp sync`,
                               ``,
                             ]
+                      }
+                      getCompletions={() =>
+                        hasFtpSession(device.id)
+                          ? FTP_COMPLETIONS
+                          : isLinux
+                            ? PC_LINUX_COMPLETIONS
+                            : PC_WIN_COMPLETIONS
                       }
                       onCommand={(line) => runPcCommand(line, makeCtx())}
                     />
@@ -948,9 +970,17 @@ function SshClientPanel({
                 `SSH to ${session.target.name}`,
                 `User Access Verification`,
                 ``,
-                `Type help or ? for commands. Digita enable per privilegi.`,
+                `Type help or ? · Tab completa. Digita enable per privilegi.`,
                 ``,
               ]}
+              getCompletions={() =>
+                iosCompletions(
+                  session.cli.mode,
+                  session.target.interfaces
+                    .filter((i) => !i.parentIfaceId)
+                    .map((i) => i.name),
+                )
+              }
               onCommand={(line) => {
                 let nextCli = session.cli;
                 const res = runRouterCommand(
@@ -962,7 +992,6 @@ function SshClientPanel({
                     setSession((s) => (s ? { ...s, cli: c } : s));
                   },
                 );
-                // sync prompt after mode change
                 void nextCli;
                 return res;
               }}

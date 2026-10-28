@@ -40,6 +40,10 @@ type FtpSession = {
 
 const ftpSessions = new Map<string, FtpSession>();
 
+export function hasFtpSession(deviceId: string): boolean {
+  return ftpSessions.has(deviceId);
+}
+
 export type CommandContext = {
   state: LabState;
   deviceId: string;

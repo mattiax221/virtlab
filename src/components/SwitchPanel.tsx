@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { iosCompletions } from "@/lib/cli-complete";
 import {
   initialRouterCli,
   routerPrompt,
@@ -251,7 +252,7 @@ export function SwitchPanel({
               background="#0b1220"
               welcome={[
                 `Switch console — ${live.name}`,
-                `L2: VLAN, porte, MAC table. Digita help`,
+                `L2: VLAN, porte, MAC · Tab completa · help`,
                 ``,
                 `  enable`,
                 `  show vlan brief`,
@@ -262,6 +263,14 @@ export function SwitchPanel({
                 `  interface Fa0/X → switchport mode trunk`,
                 ``,
               ]}
+              getCompletions={() =>
+                iosCompletions(
+                  cli.mode,
+                  live.interfaces
+                    .filter((i) => !i.parentIfaceId)
+                    .map((i) => i.name),
+                )
+              }
               onCommand={(line) => {
                 let nextCli = cli;
                 const result = runSwitchCommand(line, makeCtx(), cli, (n) => {

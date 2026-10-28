@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { iosCompletions } from "@/lib/cli-complete";
 import {
   initialRouterCli,
   routerPrompt,
@@ -102,6 +103,7 @@ export function RouterConsole({
               background="#0b1220"
               welcome={[
                 `Router console — ${live.name}`,
+                `Tab = autocompletamento (anche abbreviazioni: sh → show).`,
                 `Inter-VLAN (router-on-a-stick):`,
                 `  conf t`,
                 `  interface GigabitEthernet0/0.10`,
@@ -111,6 +113,19 @@ export function RouterConsole({
                 `Sullo switch: porta verso questo router → switchport mode trunk`,
                 ``,
               ]}
+              getCompletions={() =>
+                iosCompletions(
+                  cli.mode,
+                  live.interfaces
+                    .filter((i) => !i.parentIfaceId)
+                    .flatMap((i) => [
+                      i.name,
+                      // suggerisci anche subinterface comuni
+                      `${i.name}.10`,
+                      `${i.name}.20`,
+                    ]),
+                )
+              }
               onCommand={(line) => {
                 let nextCli = cli;
                 const result = runRouterCommand(

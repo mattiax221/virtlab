@@ -2,6 +2,7 @@ import { routerAllowsIcmp } from "./acl";
 import { learnArp } from "./arp";
 import { inferCable, type CableKind } from "./catalog";
 import { getDevice, getIface } from "./engine-helpers";
+import { hostFirewallBlocks } from "./hostFirewall";
 import { formatIp, isValidIp, parseIp, parseMask, sameSubnet } from "./ip";
 import { l2Flood } from "./l2";
 import {
@@ -871,6 +872,14 @@ export function runPing(
     };
   }
 
+  const blockedOut = hostFirewallBlocks(from, "out", "icmp", targetIp);
+  if (blockedOut) {
+    return {
+      state,
+      result: failPing(fromIp, targetIp, count, [], blockedOut),
+    };
+  }
+
   if (srcIface.ip === targetIp) {
     return {
       state,
@@ -963,6 +972,18 @@ export function runPing(
       deviceName: target.device.name,
       ip: targetIp,
     });
+    const blockedIn = hostFirewallBlocks(
+      target.device,
+      "in",
+      "icmp",
+      fromIp,
+    );
+    if (blockedIn) {
+      return {
+        state: nextState,
+        result: failPing(fromIp, targetIp, count, hops, blockedIn),
+      };
+    }
     const rtt = 2 + Math.floor(Math.random() * 4);
     return {
       state: nextState,
@@ -1099,6 +1120,13 @@ export function runPing(
       deviceName: found.device.name,
       ip: targetIp,
     });
+    const blockedInL3 = hostFirewallBlocks(found.device, "in", "icmp", fromIp);
+    if (blockedInL3) {
+      return {
+        state: nextState,
+        result: failPing(fromIp, targetIp, count, hops, blockedInL3),
+      };
+    }
     const rtt = 8 + Math.floor(Math.random() * 12);
     return {
       state: nextState,

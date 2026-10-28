@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { completeLine } from "@/lib/cli-complete";
 
 type Line = { kind: "in" | "out" | "sys"; text: string };
 
@@ -8,12 +9,15 @@ export function Terminal({
   prompt,
   welcome,
   onCommand,
+  getCompletions,
   accent = "#4ade80",
   background = "#0b1220",
 }: {
   prompt: string;
   welcome: string[];
   onCommand: (line: string) => { output: string; clear?: boolean };
+  /** Dizionario dinamico (modo CLI / OS). Tab completa abbreviazioni stile Cisco/bash. */
+  getCompletions?: () => string[];
   accent?: string;
   background?: string;
 }) {
@@ -25,6 +29,7 @@ export function Terminal({
   const [histIdx, setHistIdx] = useState(-1);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const lastTabRef = useRef<{ value: string; at: number } | null>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -38,6 +43,7 @@ export function Terminal({
     }
     setHistIdx(-1);
     setInput("");
+    lastTabRef.current = null;
     const result = onCommand(value);
     if (result.clear) {
       setLines([]);
@@ -48,6 +54,44 @@ export function Terminal({
         ...prev,
         ...result.output.split("\n").map((text) => ({ kind: "out" as const, text })),
       ]);
+    }
+  }
+
+  function onTab() {
+    if (!getCompletions) return;
+    const dict = getCompletions();
+    const result = completeLine(input, dict);
+    const now = Date.now();
+    const prev = lastTabRef.current;
+    const doubleTab =
+      prev &&
+      prev.value === input &&
+      now - prev.at < 900 &&
+      result.suggestions &&
+      result.suggestions.length > 0;
+
+    if (result.value !== input) {
+      setInput(result.value);
+      lastTabRef.current = { value: result.value, at: now };
+      return;
+    }
+
+    if (result.suggestions && result.suggestions.length > 0) {
+      // Prima Tab ambigua: se non c'è progresso, mostra subito la lista
+      // (o al secondo Tab sullo stesso input)
+      if (doubleTab || !prev || prev.value !== input) {
+        setLines((linesPrev) => [
+          ...linesPrev,
+          { kind: "in" as const, text: `${prompt} ${input}` },
+          ...result.suggestions!.map((text) => ({
+            kind: "sys" as const,
+            text: `  ${text}`,
+          })),
+        ]);
+        lastTabRef.current = { value: input, at: now };
+      }
+    } else {
+      lastTabRef.current = { value: input, at: now };
     }
   }
 
@@ -82,9 +126,15 @@ export function Terminal({
             autoComplete="off"
             className="min-w-0 flex-1 bg-transparent outline-none"
             style={{ color: accent, caretColor: accent }}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={(e) => {
+              setInput(e.target.value);
+              lastTabRef.current = null;
+            }}
             onKeyDown={(e) => {
-              if (e.key === "Enter") {
+              if (e.key === "Tab") {
+                e.preventDefault();
+                onTab();
+              } else if (e.key === "Enter") {
                 e.preventDefault();
                 submit(input);
               } else if (e.key === "ArrowUp") {
