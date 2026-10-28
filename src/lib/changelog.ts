@@ -236,7 +236,7 @@ export const releases: ChangelogEntry[] = [
       "Desktop Traffic Generator (PDU su canvas); FTP interattivo user/pass/dir/get; SYSLOG su link-up/power; ntp sync; DNS cache con TTL.",
   },
   {
-    sha: "pending",
+    sha: "de97204",
     date: "2026-10-28",
     title: "Client Email Desktop + TFTP flash",
     detail:
