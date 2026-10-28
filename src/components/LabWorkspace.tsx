@@ -742,6 +742,13 @@ export function LabWorkspace() {
         <span className="mr-1 font-display text-sm font-semibold tracking-tight">
           NetLab
         </span>
+        <a
+          href="/changelog"
+          className="mr-1 hidden rounded px-2 py-1 text-[11px] text-slate-400 hover:bg-slate-800 hover:text-sky-300 sm:inline"
+          title="Cronologia e cose da fare"
+        >
+          Changelog
+        </a>
         <div className="mx-1 h-4 w-px bg-slate-700" />
 
         <ToolButton
