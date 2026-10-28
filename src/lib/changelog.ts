@@ -314,7 +314,7 @@ export const releases: ChangelogEntry[] = [
       "/comandi (a cosa serve / cosa non fa); Telnet/SSH Desktop apre la CLI del router/switch.",
   },
   {
-    sha: "pending",
+    sha: "709f3da",
     date: "2026-10-28",
     title: "Desktop Windows o Linux a scelta",
     detail:
