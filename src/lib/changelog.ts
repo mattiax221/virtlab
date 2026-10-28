@@ -328,7 +328,7 @@ export const releases: ChangelogEntry[] = [
       "Tab completa comandi (CMD/bash/IOS); Desktop Firewall con regole su ping.",
   },
   {
-    sha: "pending",
+    sha: "401eeb4",
     date: "2026-10-28",
     title: "Printer-PT configurabile",
     detail:
