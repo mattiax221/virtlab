@@ -1447,6 +1447,10 @@ export function LabWorkspace() {
           stateRef={stateRef}
           setState={setState}
           onClose={closeOpen}
+          onSimulate={(packets, message) => {
+            if (packets.length) setSimPackets(packets);
+            showToast(message);
+          }}
         />
       )}
       {openDevice && openMode === "router" && (

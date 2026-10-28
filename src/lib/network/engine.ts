@@ -14,6 +14,7 @@ import {
   type ModuleKind,
 } from "./modules";
 import { defaultServerServices, requestDhcp, resolveDnsName } from "./services";
+import { appendSyslog } from "./telemetry";
 import {
   DEVICE_META,
   defaultVlans,
@@ -114,12 +115,21 @@ export function setDevicePower(
   deviceId: string,
   powered: boolean,
 ): LabState {
-  return {
+  const device = getDevice(state, deviceId);
+  let next: LabState = {
     ...state,
     devices: state.devices.map((d) =>
       d.id === deviceId ? { ...d, powered } : d,
     ),
   };
+  if (device) {
+    next = appendSyslog(
+      next,
+      device.name,
+      powered ? "%SYS-5-RESTART: System restarted" : "%SYS-5-POWEROFF: Power off",
+    );
+  }
+  return next;
 }
 
 export function installModule(
@@ -536,6 +546,12 @@ export function connectDevices(
       }
     }
   }
+
+  next = appendSyslog(
+    next,
+    a.name,
+    `LINK-UP: ${aIf.name} connected to ${b.name} ${bIf.name} (${media})`,
+  );
 
   return { state: next };
 }

@@ -228,29 +228,54 @@ export const releases: ChangelogEntry[] = [
     detail:
       "Pagina /changelog in italiano: cronologia dal primo commit e elenco cose da fare.",
   },
+  {
+    sha: "pending",
+    date: "2026-10-28",
+    title: "Traffic Generator, FTP, SYSLOG, NTP, DNS cache",
+    detail:
+      "Desktop Traffic Generator (PDU su canvas); FTP interattivo user/pass/dir/get; SYSLOG su link-up/power; ntp sync; DNS cache con TTL.",
+  },
 ];
 
 /** Roadmap / cose da fare (aggiornare quando si completa un item). */
 export const todos: TodoItem[] = [
   {
-    id: "deploy-virt-lab",
-    title: "Sync su virt-lab + deploy Vercel",
-    detail:
-      "Far arrivare main aggiornato su aasda-add/virt-lab e ridistribuire virt-lab-wheat.vercel.app (oggi il cloud agent ha 403 sul push).",
-    status: "todo",
-  },
-  {
     id: "traffic-generator",
     title: "Traffic Generator / PDU dal Desktop",
     detail:
-      "Utility Desktop PT per generare PDU semplici/complessi come nella Common Tools Bar.",
-    status: "todo",
+      "Utility Desktop PT: ICMP/HTTP/DNS/DHCP con animazione PDU sul canvas.",
+    status: "done",
   },
   {
     id: "ftp-interactive",
     title: "FTP interattivo (login + get/put)",
     detail:
-      "Sessione FTP stile prompt (USER/PASS, get/put) usando account e permessi del Server-PT.",
+      "Sessione FTP: user/pass/dir/get/delete/bye (account default cisco/cisco).",
+    status: "done",
+  },
+  {
+    id: "dns-cache-ttl",
+    title: "DNS cache con TTL",
+    detail: "Cache sul Server-PT aggiornata da query (TTL 300s), visibile in Services → DNS.",
+    status: "done",
+  },
+  {
+    id: "syslog-ingest",
+    title: "SYSLOG da eventi di rete",
+    detail: "Link-up e power on/off scrivono sul Server-PT SYSLOG.",
+    status: "done",
+  },
+  {
+    id: "ntp-sync",
+    title: "Sincronizzazione NTP sui host",
+    detail: "Comando `ntp sync` / `w32tm /resync` aggiorna orologio desktop dal Server-PT.",
+    status: "done",
+  },
+  {
+    id: "deploy-virt-lab",
+    title: "Sync su virt-lab + deploy Vercel",
+    detail:
+      "Far arrivare main aggiornato su aasda-add/virt-lab e ridistribuire virt-lab-wheat.vercel.app (cloud agent: 403 sul push).",
     status: "todo",
   },
   {
@@ -264,24 +289,6 @@ export const todos: TodoItem[] = [
     title: "STP e MAC unicast più fedeli",
     detail:
       "Spanning Tree semplificato e forwarding unicast basato sulla tabella MAC (meno flood).",
-    status: "todo",
-  },
-  {
-    id: "dns-cache-ttl",
-    title: "DNS cache con TTL / SOA timer",
-    detail: "Cache DNS lato server e client con scadenza TTL come nelle docs PT.",
-    status: "todo",
-  },
-  {
-    id: "syslog-ingest",
-    title: "SYSLOG da router/switch",
-    detail: "I device di rete inviano messaggi al Server-PT SYSLOG quando cambiano stato.",
-    status: "todo",
-  },
-  {
-    id: "ntp-sync",
-    title: "Sincronizzazione NTP sui device",
-    detail: "Router/switch possono fare client NTP verso il server e aggiornare l’orologio.",
     status: "todo",
   },
   {

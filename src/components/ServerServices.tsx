@@ -856,7 +856,16 @@ export function ServerServices({
                   window.alert(
                     `DNS Cache (${svc.dns?.cache?.length ?? 0} voci)\n` +
                       (svc.dns?.cache ?? [])
-                        .map((c) => `${c.name} → ${c.ip}`)
+                        .map((c) => {
+                          const left =
+                            c.expiresAt != null
+                              ? Math.max(
+                                  0,
+                                  Math.round((c.expiresAt - Date.now()) / 1000),
+                                )
+                              : (c.ttl ?? 300);
+                          return `${c.name} → ${c.ip}  (TTL ${left}s)`;
+                        })
                         .join("\n") ||
                       "(vuota)",
                   )

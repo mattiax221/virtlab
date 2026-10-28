@@ -18,9 +18,19 @@ import {
   fetchHttp,
   releaseDhcp,
   requestDhcp,
-  resolveDnsName,
+  resolveDnsQuery,
 } from "./services";
+import { syncNtp } from "./telemetry";
 import type { CommandResult, LabState, StaticRoute, VlanRecord } from "./types";
+
+type FtpSession = {
+  serverId: string;
+  serverIp: string;
+  user: string | null;
+  authed: boolean;
+};
+
+const ftpSessions = new Map<string, FtpSession>();
 
 export type CommandContext = {
   state: LabState;
@@ -40,7 +50,8 @@ function helpPc(): string {
     "  ping <indirizzo|nome>    ICMP (anche nomi DNS tipo server.lab)",
     "  nslookup <nome>          Query DNS",
     "  http <host>              GET HTTP su Server-PT",
-    "  ftp <host>               Elenca file/account FTP del server",
+    "  ftp <host>               Sessione FTP (user/pass, dir, get, bye)",
+    "  ntp sync                 Sincronizza orologio da Server-PT NTP",
     "  dir / delete <file>      File locali (simulati)",
     "  arp -a                   Cache ARP reale (imparata dai ping)",
     "  route print              Tabella di routing",
@@ -354,7 +365,8 @@ export function runPcCommand(
     const dns =
       device?.interfaces.find((i) => i.dnsServers.length)?.dnsServers[0] ??
       "???";
-    const ip = resolveDnsName(ctx.state, ctx.deviceId, name);
+    const { ip, state } = resolveDnsQuery(ctx.state, ctx.deviceId, name);
+    ctx.setState(state);
     if (!ip) {
       return {
         output: [
@@ -372,14 +384,27 @@ export function runPcCommand(
         ``,
         `Nome:    ${name}`,
         `Address:  ${ip}`,
+        ``,
+        `(cache DNS aggiornata, TTL 300s)`,
       ].join("\n"),
     };
+  }
+
+  const ftpSession = ftpSessions.get(ctx.deviceId);
+  if (ftpSession) {
+    return handleFtpSession(raw, ctx, ftpSession);
   }
 
   if (lower.startsWith("ftp ")) {
     const target = parts[1];
     if (!target) return { output: "Uso: ftp <host|ip>" };
-    return { output: ftpList(ctx, target) };
+    return startFtpSession(ctx, target);
+  }
+
+  if (lower === "ntp sync" || lower === "w32tm /resync") {
+    const res = syncNtp(ctx.state, ctx.deviceId);
+    ctx.setState(res.state);
+    return { output: res.message };
   }
 
   if (lower === "dir" || lower === "dir /") {
@@ -425,63 +450,154 @@ export function runPcCommand(
   };
 }
 
-function ftpList(ctx: CommandContext, target: string): string {
+function startFtpSession(ctx: CommandContext, target: string): CommandResult {
   let ip = target;
+  let state = ctx.state;
   if (!/^\d+\.\d+\.\d+\.\d+$/.test(target)) {
-    const resolved = resolveDnsName(ctx.state, ctx.deviceId, target);
-    if (!resolved) return `ftp: Impossibile risolvere ${target}`;
-    ip = resolved;
+    const q = resolveDnsQuery(state, ctx.deviceId, target);
+    state = q.state;
+    if (!q.ip) return { output: `ftp: Impossibile risolvere ${target}` };
+    ip = q.ip;
   }
-  const { result, state } = runPing(ctx.state, ctx.deviceId, ip);
-  ctx.setState(state);
+  const { result, state: afterPing } = runPing(state, ctx.deviceId, ip);
+  ctx.setState(afterPing);
   if (!result.ok) {
-    return `ftp: connessione a ${ip} fallita — host non raggiungibile`;
+    return {
+      output: `ftp: connessione a ${ip} fallita — host non raggiungibile`,
+    };
   }
-  const server = state.devices.find(
-    (d) =>
-      d.interfaces.some((i) => i.ip === ip) && d.services?.ftp,
+  const server = afterPing.devices.find(
+    (d) => d.interfaces.some((i) => i.ip === ip) && d.services?.ftp,
   );
-  if (!server?.services?.ftp) {
-    return `ftp: nessun servizio FTP su ${ip}`;
+  if (!server?.services?.ftp?.enabled) {
+    return { output: `ftp: nessun servizio FTP attivo su ${ip}` };
   }
-  const ftp = server.services.ftp;
-  if (!ftp.enabled) {
-    return `ftp: servizio FTP disabilitato su ${server.name}`;
+  ftpSessions.set(ctx.deviceId, {
+    serverId: server.id,
+    serverIp: ip,
+    user: null,
+    authed: false,
+  });
+  return {
+    output: [
+      `Connected to ${server.name} (${ip}).`,
+      `220 ${server.name} FTP server (NetLab) ready.`,
+      `Name (${ip}): (digita: user <nome>)`,
+      `Comandi: user <u> | pass <p> | dir | get <file> | bye`,
+    ].join("\n"),
+  };
+}
+
+function handleFtpSession(
+  raw: string,
+  ctx: CommandContext,
+  session: FtpSession,
+): CommandResult {
+  const line = raw.trim();
+  const lower = line.toLowerCase();
+  const parts = line.split(/\s+/);
+  const server = getDevice(ctx.state, session.serverId);
+  const ftp = server?.services?.ftp;
+
+  if (!server || !ftp?.enabled) {
+    ftpSessions.delete(ctx.deviceId);
+    return { output: "421 Service not available — sessione chiusa." };
   }
-  const accounts =
-    ftp.accounts.length === 0
-      ? "  (nessun account — aggiungine in Services → FTP)"
-      : ftp.accounts
-          .map(
-            (a) =>
-              `  ${a.username}  perms=${[
-                a.permissions.read && "R",
-                a.permissions.write && "W",
-                a.permissions.delete && "D",
-                a.permissions.rename && "N",
-                a.permissions.list && "L",
-              ]
-                .filter(Boolean)
-                .join("")}`,
-          )
-          .join("\n");
-  const files =
-    ftp.files.length === 0
-      ? "  (vuoto)"
-      : ftp.files.map((f) => `  ${f.name.padEnd(24)} ${f.size} B`).join("\n");
-  return [
-    `Connected to ${server.name} (${ip}).`,
-    `220 ${server.name} FTP server ready.`,
-    `Service: ${ftp.enabled ? "ON" : "OFF"}`,
-    ``,
-    `Accounts:`,
-    accounts,
-    ``,
-    `Files:`,
-    files,
-    ``,
-    `221 Goodbye.`,
-  ].join("\n");
+
+  if (lower === "bye" || lower === "quit" || lower === "exit") {
+    ftpSessions.delete(ctx.deviceId);
+    return { output: "221 Goodbye." };
+  }
+
+  if (lower.startsWith("user ")) {
+    const user = parts[1];
+    if (!user) return { output: "503 Specify USER." };
+    session.user = user;
+    session.authed = false;
+    ftpSessions.set(ctx.deviceId, session);
+    return { output: `331 Password required for ${user}.\n(usa: pass <password>)` };
+  }
+
+  if (lower.startsWith("pass ")) {
+    if (!session.user) return { output: "503 Login with USER first." };
+    const pass = parts.slice(1).join(" ");
+    const acc = ftp.accounts.find((a) => a.username === session.user);
+    if (!acc || acc.password !== pass) {
+      session.authed = false;
+      ftpSessions.set(ctx.deviceId, session);
+      return { output: "530 Login incorrect." };
+    }
+    session.authed = true;
+    ftpSessions.set(ctx.deviceId, session);
+    return { output: `230 User ${session.user} logged in.` };
+  }
+
+  if (!session.authed) {
+    return {
+      output:
+        "530 Please login with USER and PASS.\n(es. user cisco  poi  pass cisco)",
+    };
+  }
+
+  const acc = ftp.accounts.find((a) => a.username === session.user)!;
+
+  if (lower === "dir" || lower === "ls" || lower === "list") {
+    if (!acc.permissions.list) return { output: "550 Permission denied (LIST)." };
+    const files =
+      ftp.files.length === 0
+        ? "  (vuoto)"
+        : ftp.files
+            .map((f) => `-rw-r--r-- 1 ftp ftp ${String(f.size).padStart(6)} ${f.name}`)
+            .join("\n");
+    return { output: `200 PORT command successful.\n150 Opening ASCII mode.\n${files}\n226 Transfer complete.` };
+  }
+
+  if (lower.startsWith("get ") || lower.startsWith("recv ")) {
+    if (!acc.permissions.read) return { output: "550 Permission denied (READ)." };
+    const file = parts[1];
+    if (!file) return { output: "Uso: get <file>" };
+    const found = ftp.files.find((f) => f.name === file);
+    if (!found) return { output: `550 ${file}: No such file.` };
+    return {
+      output: [
+        `200 PORT command successful.`,
+        `150 Opening BINARY mode data connection for ${file} (${found.size} bytes).`,
+        `226 Transfer complete.`,
+        `ftp: ${found.size} bytes received.`,
+      ].join("\n"),
+    };
+  }
+
+  if (lower.startsWith("delete ") || lower.startsWith("rm ")) {
+    if (!acc.permissions.delete) {
+      return { output: "550 Permission denied (DELETE)." };
+    }
+    const file = parts[1];
+    if (!file) return { output: "Uso: delete <file>" };
+    if (!ftp.files.some((f) => f.name === file)) {
+      return { output: `550 ${file}: No such file.` };
+    }
+    const nextFiles = ftp.files.filter((f) => f.name !== file);
+    ctx.setState({
+      ...ctx.state,
+      devices: ctx.state.devices.map((d) =>
+        d.id === server.id
+          ? {
+              ...d,
+              services: {
+                ...d.services,
+                ftp: { ...ftp, files: nextFiles },
+              },
+            }
+          : d,
+      ),
+    });
+    return { output: `250 DELE command successful.` };
+  }
+
+  return {
+    output: `500 Unknown command '${parts[0]}'.\nComandi: user | pass | dir | get | delete | bye`,
+  };
 }
 
 export type RouterCliMode =

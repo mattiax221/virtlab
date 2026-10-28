@@ -1,6 +1,11 @@
 import { getDevice } from "./engine-helpers";
 import { isValidIp } from "./ip";
-import { resolveDnsName, requestDhcp, fetchHttp } from "./services";
+import {
+  resolveDnsName,
+  resolveDnsQuery,
+  requestDhcp,
+  fetchHttp,
+} from "./services";
 import { runPing } from "./engine";
 import type { LabState, PingHop } from "./types";
 
@@ -192,9 +197,11 @@ export function buildDnsSimulation(
   fromDeviceId: string,
   name: string,
 ): { packets: SimPacket[]; state: LabState; message: string } {
-  const serverId = findDnsServerId(state, fromDeviceId);
-  const path = pathBetween(state, fromDeviceId, serverId);
-  const ip = resolveDnsName(state, fromDeviceId, name);
+  const resolved = resolveDnsQuery(state, fromDeviceId, name);
+  const next = resolved.state;
+  const serverId = resolved.serverId ?? findDnsServerId(next, fromDeviceId);
+  const path = pathBetween(next, fromDeviceId, serverId);
+  const ip = resolved.ip;
   const packets: SimPacket[] = [];
   if (path.length >= 2) {
     packets.push({
@@ -202,7 +209,7 @@ export function buildDnsSimulation(
       kind: "DNS",
       label: "DNS Query",
       fromDeviceId,
-      toDeviceId: serverId,
+      toDeviceId: serverId ?? null,
       hops: path,
       hopIndex: 0,
       ok: !!ip,
@@ -222,7 +229,7 @@ export function buildDnsSimulation(
   }
   return {
     packets,
-    state,
+    state: next,
     message: ip ? `${name} = ${ip}` : `DNS fallito per ${name}`,
   };
 }

@@ -147,9 +147,24 @@ export function defaultServerServices(name: string): DeviceServices {
       users: [],
     },
     ftp: {
-      enabled: false,
-      accounts: [],
-      files: [{ name: "readme.txt", size: 48 }],
+      enabled: true,
+      accounts: [
+        {
+          username: "cisco",
+          password: "cisco",
+          permissions: {
+            write: true,
+            read: true,
+            delete: true,
+            rename: true,
+            list: true,
+          },
+        },
+      ],
+      files: [
+        { name: "readme.txt", size: 48 },
+        { name: "startup-config", size: 1024 },
+      ],
     },
   };
 }
@@ -401,15 +416,77 @@ function lookupDnsOnServer(
   return null;
 }
 
+const DEFAULT_DNS_TTL = 300;
+
+function readDnsCache(
+  dns: NonNullable<DeviceServices["dns"]>,
+  q: string,
+  now = Date.now(),
+): string | null {
+  const hit = dns.cache?.find(
+    (c) => c.name.toLowerCase() === q && (!c.expiresAt || c.expiresAt > now),
+  );
+  return hit?.ip ?? null;
+}
+
+function writeDnsCache(
+  state: LabState,
+  serverId: string,
+  name: string,
+  ip: string,
+  ttl = DEFAULT_DNS_TTL,
+): LabState {
+  const now = Date.now();
+  return {
+    ...state,
+    devices: state.devices.map((d) => {
+      if (d.id !== serverId || !d.services?.dns) return d;
+      const dns = d.services.dns;
+      const rest = (dns.cache ?? []).filter(
+        (c) =>
+          c.name.toLowerCase() !== name.toLowerCase() &&
+          (!c.expiresAt || c.expiresAt > now),
+      );
+      return {
+        ...d,
+        services: {
+          ...d.services,
+          dns: {
+            ...dns,
+            cache: [
+              {
+                name,
+                ip,
+                ttl,
+                expiresAt: now + ttl * 1000,
+              },
+              ...rest,
+            ].slice(0, 64),
+          },
+        },
+      };
+    }),
+  };
+}
+
 export function resolveDnsName(
   state: LabState,
   clientId: string,
   name: string,
 ): string | null {
+  return resolveDnsQuery(state, clientId, name).ip;
+}
+
+/** Risolve A/CNAME e aggiorna la DNS Cache del server (TTL). */
+export function resolveDnsQuery(
+  state: LabState,
+  clientId: string,
+  name: string,
+): { ip: string | null; state: LabState; serverId?: string } {
   const client = getDevice(state, clientId);
-  if (!client) return null;
+  if (!client) return { ip: null, state };
   const q = name.trim().toLowerCase();
-  if (!q) return null;
+  if (!q) return { ip: null, state };
 
   const dnsIps = new Set<string>();
   for (const i of client.interfaces) {
@@ -424,17 +501,25 @@ export function resolveDnsName(
     const inDomain = flood.hosts.some((h) => h.device.id === d.id);
     if (hasIp || inDomain || dnsIps.size === 0) candidates.push(d);
   }
+  if (candidates.length === 0) {
+    for (const d of state.devices) {
+      if (d.services?.dns?.enabled) candidates.push(d);
+    }
+  }
 
   for (const d of candidates) {
+    const cached = readDnsCache(d.services!.dns!, q);
+    if (cached) return { ip: cached, state, serverId: d.id };
     const ip = lookupDnsOnServer(d.services!.dns!.records, q);
-    if (ip) return ip;
+    if (ip) {
+      return {
+        ip,
+        state: writeDnsCache(state, d.id, q, ip),
+        serverId: d.id,
+      };
+    }
   }
-  for (const d of state.devices) {
-    if (!d.services?.dns?.enabled) continue;
-    const ip = lookupDnsOnServer(d.services.dns.records, q);
-    if (ip) return ip;
-  }
-  return null;
+  return { ip: null, state };
 }
 
 export function updateDeviceServices(

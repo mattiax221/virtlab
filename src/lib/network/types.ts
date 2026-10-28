@@ -207,6 +207,10 @@ export type Device = {
   arpTable?: ArpEntry[];
   /** Router static routes (ip route) */
   routes?: StaticRoute[];
+  /** Orologio sincronizzato via NTP (ISO) */
+  clockIso?: string;
+  /** Ultimo server NTP usato */
+  ntpServerId?: string;
 };
 
 export type DhcpLease = {
@@ -328,7 +332,18 @@ export type DeviceServices = {
   ipv4Mode?: "static" | "dhcp";
   algorithm?: ServerAlgorithm;
   dhcp?: DhcpService;
-  dns?: { enabled: boolean; records: DnsRecord[]; cache?: { name: string; ip: string }[] };
+  dns?: {
+    enabled: boolean;
+    records: DnsRecord[];
+    cache?: {
+      name: string;
+      ip: string;
+      /** TTL secondi (default 300) */
+      ttl?: number;
+      /** epoch ms scadenza */
+      expiresAt?: number;
+    }[];
+  };
   http?: HttpService;
   email?: EmailService;
   ftp?: FtpService;

@@ -6,11 +6,13 @@ import {
   type CommandContext,
 } from "@/lib/network/commands";
 import type { Device, LabState } from "@/lib/network/types";
+import type { SimPacket } from "@/lib/network/simulation";
 import { NetworkConnections } from "./NetworkConnections";
 import { PhysicalPanel } from "./PhysicalPanel";
 import { ServerServices } from "./ServerServices";
 import { Terminal } from "./Terminal";
 import { TextEditor } from "./TextEditor";
+import { TrafficGenerator } from "./TrafficGenerator";
 import { WebBrowser } from "./WebBrowser";
 import { WifiTray } from "./WifiTray";
 
@@ -21,6 +23,7 @@ type AppWindow =
   | "services"
   | "browser"
   | "editor"
+  | "traffic"
   | null;
 
 export function WindowsDesktop({
@@ -28,11 +31,13 @@ export function WindowsDesktop({
   stateRef,
   setState,
   onClose,
+  onSimulate,
 }: {
   device: Device;
   stateRef: React.MutableRefObject<LabState>;
   setState: (next: LabState) => void;
   onClose: () => void;
+  onSimulate?: (packets: SimPacket[], message: string) => void;
 }) {
   const live =
     stateRef.current.devices.find((d) => d.id === device.id) ?? device;
@@ -45,18 +50,20 @@ export function WindowsDesktop({
   );
 
   useEffect(() => {
-    const tick = () =>
+    const tick = () => {
+      const src = live.clockIso ? new Date(live.clockIso) : new Date();
       setClock(
-        new Date().toLocaleTimeString("it-IT", {
+        src.toLocaleTimeString("it-IT", {
           hour: "2-digit",
           minute: "2-digit",
           timeZone: "Europe/Rome",
         }),
       );
+    };
     tick();
     const id = window.setInterval(tick, 30_000);
     return () => window.clearInterval(id);
-  }, []);
+  }, [live.clockIso]);
 
   function makeCtx(): CommandContext {
     return {
@@ -138,6 +145,12 @@ export function WindowsDesktop({
               kind="editor"
               active={app === "editor"}
               onClick={() => setApp("editor")}
+            />
+            <DesktopIcon
+              label="Traffic Generator"
+              kind="traffic"
+              active={app === "traffic"}
+              onClick={() => setApp("traffic")}
             />
           </div>
 
@@ -233,6 +246,17 @@ export function WindowsDesktop({
                   onClose={() => setApp(null)}
                 />
               )}
+              {app === "traffic" && (
+                <TrafficGenerator
+                  device={device}
+                  stateRef={stateRef}
+                  setState={setState}
+                  onClose={() => setApp(null)}
+                  onGenerate={(packets, message) => {
+                    onSimulate?.(packets, message);
+                  }}
+                />
+              )}
             </div>
           )}
 
@@ -277,6 +301,11 @@ export function WindowsDesktop({
                 Text Editor
               </div>
             )}
+            {app === "traffic" && (
+              <div className="rounded bg-slate-800 px-3 py-1 text-xs text-slate-200">
+                Traffic Generator
+              </div>
+            )}
             <div className="ml-auto flex items-center gap-1 pr-1">
               <WifiTray
                 device={device}
@@ -299,7 +328,15 @@ function DesktopIcon({
   onClick,
 }: {
   label: string;
-  kind: "pc" | "cmd" | "net" | "phys" | "svc" | "browser" | "editor";
+  kind:
+    | "pc"
+    | "cmd"
+    | "net"
+    | "phys"
+    | "svc"
+    | "browser"
+    | "editor"
+    | "traffic";
   active?: boolean;
   onClick: () => void;
 }) {
@@ -316,6 +353,12 @@ function DesktopIcon({
           <span className="font-mono text-sm text-emerald-300">&gt;_</span>
         ) : kind === "svc" ? (
           <span className="text-sm font-bold text-amber-200">S</span>
+        ) : kind === "traffic" ? (
+          <svg viewBox="0 0 24 24" className="h-5 w-5 text-emerald-200" fill="none" stroke="currentColor" strokeWidth="1.8">
+            <path d="M4 12h10M14 12l-3-3M14 12l-3 3" />
+            <path d="M20 12H10M10 12l3-3M10 12l3 3" opacity="0.5" />
+            <circle cx="12" cy="12" r="9" opacity="0.35" />
+          </svg>
         ) : kind === "browser" ? (
           <svg viewBox="0 0 24 24" className="h-5 w-5 text-sky-100" fill="none" stroke="currentColor" strokeWidth="1.8">
             <circle cx="12" cy="12" r="9" />
