@@ -42,34 +42,53 @@ type AppId =
   | "stub"
   | null;
 
+type IconKind =
+  | "ip"
+  | "cmd"
+  | "terminal"
+  | "browser"
+  | "wireless"
+  | "vpn"
+  | "traffic"
+  | "email"
+  | "pppoe"
+  | "editor"
+  | "rdp"
+  | "ssh"
+  | "firewall"
+  | "mib"
+  | "voip"
+  | "physical"
+  | "services";
+
 type Shortcut = {
   id: AppId;
   label: string;
-  glyph: string;
+  icon: IconKind;
   /** Solo server */
   serverOnly?: boolean;
   stub?: boolean;
 };
 
-/** Shortcut Desktop stile Packet Tracer (PC + Server). */
+/** Shortcut Desktop stile Packet Tracer — etichette corte e leggibili. */
 const SHORTCUTS: Shortcut[] = [
-  { id: "ipconfig", label: "IP Configuration", glyph: "IP" },
-  { id: "cmd", label: "Command Prompt", glyph: ">_" },
-  { id: "terminal", label: "Terminal", glyph: "Τ" },
-  { id: "browser", label: "Web Browser", glyph: "🌐" },
-  { id: "wireless", label: "PC Wireless", glyph: "📡" },
-  { id: "vpn", label: "VPN", glyph: "🔒" },
-  { id: "traffic", label: "Traffic Generator", glyph: "✉+" },
-  { id: "email", label: "Email", glyph: "@" },
-  { id: "pppoe", label: "PPPoE Dialer", glyph: "PPP" },
-  { id: "editor", label: "Text Editor", glyph: "✎" },
-  { id: "rdp", label: "Remote Desktop", glyph: "🖥" },
-  { id: "ssh", label: "Telnet / SSH Client", glyph: "SSH" },
-  { id: "firewall", label: "Firewall", glyph: "FW", stub: true },
-  { id: "mib", label: "MIB Browser", glyph: "MIB", stub: true },
-  { id: "voip", label: "IP Communicator", glyph: "☎", stub: true },
-  { id: "physical", label: "Physical", glyph: "⚙" },
-  { id: "services", label: "Config / Services", glyph: "S", serverOnly: true },
+  { id: "ipconfig", label: "IP Configuration", icon: "ip" },
+  { id: "cmd", label: "Command Prompt", icon: "cmd" },
+  { id: "terminal", label: "Terminal", icon: "terminal" },
+  { id: "browser", label: "Web Browser", icon: "browser" },
+  { id: "wireless", label: "PC Wireless", icon: "wireless" },
+  { id: "vpn", label: "VPN", icon: "vpn" },
+  { id: "traffic", label: "Traffic Generator", icon: "traffic" },
+  { id: "email", label: "Email", icon: "email" },
+  { id: "pppoe", label: "PPPoE Dialer", icon: "pppoe" },
+  { id: "editor", label: "Text Editor", icon: "editor" },
+  { id: "rdp", label: "Remote Desktop", icon: "rdp" },
+  { id: "ssh", label: "Telnet / SSH", icon: "ssh" },
+  { id: "firewall", label: "Firewall", icon: "firewall", stub: true },
+  { id: "mib", label: "MIB Browser", icon: "mib", stub: true },
+  { id: "voip", label: "IP Communicator", icon: "voip", stub: true },
+  { id: "physical", label: "Physical", icon: "physical" },
+  { id: "services", label: "Services", icon: "services", serverOnly: true },
 ];
 
 export function WindowsDesktop({
@@ -183,18 +202,20 @@ export function WindowsDesktop({
           className="relative flex min-h-0 flex-1 flex-col"
           style={{
             background: live.powered
-              ? "#0a2a5c"
+              ? "linear-gradient(180deg, #0c356e 0%, #082448 100%)"
               : "linear-gradient(145deg, #1e293b 0%, #0f172a 100%)",
+            fontFamily:
+              "Tahoma, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif",
           }}
         >
           {/* Griglia shortcut PT */}
           {!app && (
-            <div className="relative z-10 grid grid-cols-3 gap-3 overflow-y-auto p-4 sm:grid-cols-5 sm:gap-4 sm:p-6">
+            <div className="relative z-10 grid grid-cols-3 gap-x-2 gap-y-5 overflow-y-auto px-3 py-5 sm:grid-cols-5 sm:gap-x-4 sm:gap-y-6 sm:px-8 sm:py-7">
               {icons.map((s) => (
                 <PtShortcut
                   key={s.id}
                   label={s.label}
-                  glyph={s.glyph}
+                  icon={s.icon}
                   dimmed={!!s.stub}
                   onClick={() => openShortcut(s)}
                 />
@@ -390,12 +411,12 @@ export function WindowsDesktop({
 
 function PtShortcut({
   label,
-  glyph,
+  icon,
   dimmed,
   onClick,
 }: {
   label: string;
-  glyph: string;
+  icon: IconKind;
   dimmed?: boolean;
   onClick: () => void;
 }) {
@@ -403,18 +424,250 @@ function PtShortcut({
     <button
       type="button"
       onClick={onClick}
-      className={`flex flex-col items-center gap-1.5 text-center touch-manipulation ${
-        dimmed ? "opacity-70" : ""
+      className={`group flex flex-col items-center gap-2 text-center touch-manipulation ${
+        dimmed ? "opacity-60" : ""
       }`}
     >
-      <div className="flex h-14 w-14 items-center justify-center rounded-sm bg-[#5dade2] text-[13px] font-bold text-[#0a2a5c] shadow-md ring-1 ring-white/30 transition hover:brightness-110 sm:h-16 sm:w-16">
-        <span className="leading-none">{glyph}</span>
+      <div className="flex h-[3.75rem] w-[3.75rem] items-center justify-center rounded-[3px] bg-[#7ec8e8] shadow-[inset_0_1px_0_rgba(255,255,255,0.45),0_2px_6px_rgba(0,0,0,0.35)] ring-1 ring-[#2a6f9a]/35 transition group-hover:bg-[#95d4f0] group-hover:brightness-105 sm:h-[4.25rem] sm:w-[4.25rem]">
+        <DesktopGlyph kind={icon} />
       </div>
-      <span className="max-w-[5.5rem] text-[10px] leading-tight text-white drop-shadow sm:text-[11px]">
+      <span className="max-w-[6.25rem] text-[11px] font-medium leading-snug tracking-wide text-white [text-shadow:0_1px_2px_rgba(0,0,0,0.85)] sm:max-w-[7rem] sm:text-[12px]">
         {label}
       </span>
     </button>
   );
+}
+
+function DesktopGlyph({ kind }: { kind: IconKind }) {
+  const common = {
+    viewBox: "0 0 48 48",
+    className: "h-9 w-9 sm:h-10 sm:w-10",
+    fill: "none" as const,
+    stroke: "#0b2d4d",
+    strokeWidth: 2.1,
+    strokeLinecap: "round" as const,
+    strokeLinejoin: "round" as const,
+  };
+
+  switch (kind) {
+    case "ip":
+      return (
+        <svg {...common}>
+          <rect x="8" y="14" width="32" height="20" rx="2" fill="#f4f8fc" />
+          <path d="M16 14v20M24 14v20M32 14v20" />
+          <text
+            x="12"
+            y="28"
+            fill="#0b2d4d"
+            stroke="none"
+            fontSize="9"
+            fontFamily="ui-monospace,monospace"
+            fontWeight="700"
+          >
+            192
+          </text>
+        </svg>
+      );
+    case "cmd":
+      return (
+        <svg {...common}>
+          <rect x="7" y="10" width="34" height="26" rx="2" fill="#1e3a5f" />
+          <path d="M14 20l5 4-5 4M22 28h10" stroke="#e8f4ff" />
+        </svg>
+      );
+    case "terminal":
+      return (
+        <svg {...common}>
+          <rect x="9" y="8" width="30" height="24" rx="2" fill="#1e3a5f" />
+          <path d="M16 30h16" />
+          <path d="M16 18l4 3-4 3" stroke="#e8f4ff" />
+          <path d="M22 24h8" stroke="#e8f4ff" />
+        </svg>
+      );
+    case "browser":
+      return (
+        <svg {...common}>
+          <circle cx="24" cy="24" r="12" fill="#f4f8fc" />
+          <path d="M12 24h24M24 12c3.5 3.5 3.5 20.5 0 24M24 12c-3.5 3.5-3.5 20.5 0 24" />
+          <path
+            d="M14 30c4-2 16-2 20 0"
+            stroke="#c9a227"
+            strokeWidth="2.4"
+          />
+        </svg>
+      );
+    case "wireless":
+      return (
+        <svg {...common}>
+          <path d="M24 36v-8" />
+          <path d="M18 36h12" />
+          <path d="M24 14c6 0 11 5 11 11" />
+          <path d="M24 14c-6 0-11 5-11 11" />
+          <path d="M24 20c3 0 6 2.5 6 5.5" />
+          <path d="M24 20c-3 0-6 2.5-6 5.5" />
+          <circle cx="24" cy="28" r="1.8" fill="#0b2d4d" stroke="none" />
+        </svg>
+      );
+    case "vpn":
+      return (
+        <svg {...common}>
+          <rect x="10" y="12" width="28" height="20" rx="2" fill="#f4f8fc" />
+          <rect
+            x="20"
+            y="24"
+            width="14"
+            height="12"
+            rx="2"
+            fill="#d9e2ec"
+          />
+          <path d="M24 24v-3a3 3 0 016 0v3" />
+          <circle cx="27" cy="30" r="1.4" fill="#0b2d4d" stroke="none" />
+        </svg>
+      );
+    case "traffic":
+      return (
+        <svg {...common}>
+          <rect x="10" y="18" width="22" height="14" rx="1.5" fill="#f4f8fc" />
+          <rect x="14" y="14" width="22" height="14" rx="1.5" fill="#e8eef5" />
+          <rect x="18" y="10" width="22" height="14" rx="1.5" fill="#f4f8fc" />
+          <path d="M22 17h10M22 21h8" />
+          <circle cx="36" cy="34" r="7" fill="#2f9e44" stroke="#0b2d4d" />
+          <path d="M36 30v8M32 34h8" stroke="#fff" strokeWidth="2" />
+        </svg>
+      );
+    case "email":
+      return (
+        <svg {...common}>
+          <rect x="8" y="14" width="26" height="20" rx="1.5" fill="#f4f8fc" />
+          <path d="M8 16l13 10L34 16" />
+          <rect x="22" y="20" width="16" height="14" rx="1" fill="#fff8e7" />
+          <text
+            x="26"
+            y="30"
+            fill="#0b2d4d"
+            stroke="none"
+            fontSize="11"
+            fontFamily="Georgia,serif"
+            fontWeight="700"
+          >
+            @
+          </text>
+        </svg>
+      );
+    case "pppoe":
+      return (
+        <svg {...common}>
+          <rect x="10" y="16" width="28" height="16" rx="2" fill="#f4f8fc" />
+          <circle cx="16" cy="24" r="1.6" fill="#e03131" stroke="none" />
+          <circle cx="22" cy="24" r="1.6" fill="#e03131" stroke="none" />
+          <circle cx="28" cy="24" r="1.6" fill="#e03131" stroke="none" />
+          <path d="M34 20v8" />
+        </svg>
+      );
+    case "editor":
+      return (
+        <svg {...common}>
+          <path d="M14 10h14l8 8v20H14z" fill="#f4f8fc" />
+          <path d="M28 10v8h8" />
+          <path d="M18 24h12M18 29h10M18 34h8" />
+          <path d="M32 36l6-6 2 2-6 6h-2z" fill="#c9a227" />
+        </svg>
+      );
+    case "rdp":
+      return (
+        <svg {...common}>
+          <rect x="6" y="10" width="22" height="16" rx="1.5" fill="#f4f8fc" />
+          <rect x="18" y="20" width="22" height="16" rx="1.5" fill="#dce9f5" />
+          <path d="M12 30h10M24 40h10" />
+        </svg>
+      );
+    case "ssh":
+      return (
+        <svg {...common}>
+          <rect x="8" y="12" width="32" height="22" rx="2" fill="#1e3a5f" />
+          <path d="M14 20l4 3-4 3" stroke="#e8f4ff" />
+          <path d="M20 26h8" stroke="#e8f4ff" />
+          <rect
+            x="28"
+            y="28"
+            width="12"
+            height="10"
+            rx="1.5"
+            fill="#d9e2ec"
+          />
+          <path d="M31 28v-2a3 3 0 016 0v2" />
+        </svg>
+      );
+    case "firewall":
+      return (
+        <svg {...common}>
+          <rect x="10" y="10" width="28" height="18" rx="1.5" fill="#f4f8fc" />
+          <text
+            x="16"
+            y="22"
+            fill="#0b2d4d"
+            stroke="none"
+            fontSize="8"
+            fontFamily="ui-monospace,monospace"
+            fontWeight="700"
+          >
+            IPv4
+          </text>
+          <path d="M12 32h6v6H12zm8 0h6v6h-6zm8 0h6v6h-6z" fill="#b35c1e" />
+          <path d="M18 30c2-4 4-4 6 0" stroke="#e8590c" />
+        </svg>
+      );
+    case "mib":
+      return (
+        <svg {...common}>
+          <circle cx="24" cy="24" r="12" fill="#f4f8fc" />
+          <path d="M12 24h24M24 12c3.5 3.5 3.5 20.5 0 24M24 12c-3.5 3.5-3.5 20.5 0 24" />
+          <rect x="14" y="20" width="20" height="8" rx="1" fill="#fff8e7" />
+          <text
+            x="17"
+            y="26"
+            fill="#0b2d4d"
+            stroke="none"
+            fontSize="7"
+            fontFamily="ui-sans-serif,system-ui"
+            fontWeight="700"
+          >
+            MIB
+          </text>
+        </svg>
+      );
+    case "voip":
+      return (
+        <svg {...common}>
+          <rect x="10" y="10" width="28" height="20" rx="2" fill="#f4f8fc" />
+          <path d="M18 36h12" />
+          <path
+            d="M20 26c0 4 8 4 8 0v-4H20z"
+            fill="#2f9e44"
+            stroke="#0b2d4d"
+          />
+          <circle cx="24" cy="20" r="3" fill="#2f9e44" stroke="#0b2d4d" />
+        </svg>
+      );
+    case "physical":
+      return (
+        <svg {...common}>
+          <rect x="8" y="14" width="32" height="20" rx="2" fill="#f4f8fc" />
+          <path d="M14 20h6M14 26h4M24 20h4M24 26h10" />
+          <circle cx="36" cy="20" r="2" />
+        </svg>
+      );
+    case "services":
+      return (
+        <svg {...common}>
+          <rect x="10" y="10" width="28" height="28" rx="2" fill="#f4f8fc" />
+          <path d="M16 18h16M16 24h16M16 30h10" />
+          <circle cx="32" cy="30" r="3" fill="#2f9e44" stroke="#0b2d4d" />
+        </svg>
+      );
+    default:
+      return null;
+  }
 }
 
 function PanelTitle({
