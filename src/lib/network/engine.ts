@@ -14,6 +14,7 @@ import {
   type ModuleKind,
 } from "./modules";
 import { defaultServerServices, requestDhcp, resolveDnsName } from "./services";
+import { recomputeStp } from "./stp";
 import { appendSyslog } from "./telemetry";
 import {
   DEVICE_META,
@@ -552,6 +553,7 @@ export function connectDevices(
     a.name,
     `LINK-UP: ${aIf.name} connected to ${b.name} ${bIf.name} (${media})`,
   );
+  next = recomputeStp(next);
 
   return { state: next };
 }
@@ -584,7 +586,7 @@ export function deleteLink(state: LabState, linkId: string): LabState {
       i.connectedLinkId === linkId ? { ...i, connectedLinkId: null } : i,
     ),
   }));
-  return { devices, links };
+  return recomputeStp({ devices, links });
 }
 
 export function updateIface(
@@ -879,8 +881,12 @@ export function runPing(
     { deviceId: from.id, deviceName: from.name, ip: fromIp },
   ];
 
-  // VLAN-aware L2 flood + MAC learning from source
-  const flood = l2Flood(state, from.id, { sourceMac: srcIface.mac });
+  // VLAN-aware L2 flood + MAC learning; unicast se ARP già conosciuto
+  const knownMac = from.arpTable?.find((e) => e.ip === targetIp)?.mac;
+  const flood = l2Flood(state, from.id, {
+    sourceMac: srcIface.mac,
+    destMac: knownMac,
+  });
   let nextState = flood.state;
 
   if (sameSubnet(srcIface.ip, targetIp, srcIface.mask)) {

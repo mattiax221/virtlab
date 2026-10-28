@@ -10,10 +10,12 @@ import type { SimPacket } from "@/lib/network/simulation";
 import { EmailClient } from "./EmailClient";
 import { NetworkConnections } from "./NetworkConnections";
 import { PhysicalPanel } from "./PhysicalPanel";
+import { PppoeDialer } from "./PppoeDialer";
 import { ServerServices } from "./ServerServices";
 import { Terminal } from "./Terminal";
 import { TextEditor } from "./TextEditor";
 import { TrafficGenerator } from "./TrafficGenerator";
+import { VpnClient } from "./VpnClient";
 import { WebBrowser } from "./WebBrowser";
 import { WifiTray } from "./WifiTray";
 
@@ -26,6 +28,8 @@ type AppWindow =
   | "editor"
   | "traffic"
   | "email"
+  | "pppoe"
+  | "vpn"
   | null;
 
 export function WindowsDesktop({
@@ -79,8 +83,8 @@ export function WindowsDesktop({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-3 backdrop-blur-sm sm:p-6">
-      <div className="flex h-[min(760px,94vh)] w-full max-w-5xl flex-col overflow-hidden rounded-lg border border-slate-600/60 shadow-2xl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-0 backdrop-blur-sm sm:p-6">
+      <div className="flex h-[100dvh] w-full max-w-5xl flex-col overflow-hidden border-0 border-slate-600/60 shadow-2xl sm:h-[min(760px,94vh)] sm:rounded-lg sm:border">
         <div className="flex items-center justify-between bg-slate-900 px-3 py-2 text-sm text-slate-200">
           <div className="flex items-center gap-2">
             <span
@@ -108,7 +112,7 @@ export function WindowsDesktop({
               : "linear-gradient(145deg, #1e293b 0%, #0f172a 100%)",
           }}
         >
-          <div className="relative z-10 flex flex-wrap gap-3 p-4">
+          <div className="relative z-10 flex flex-wrap gap-2 p-3 sm:gap-3 sm:p-4">
             <DesktopIcon label="Questo PC" kind="pc" onClick={() => undefined} />
             <DesktopIcon
               label="Connessioni di rete"
@@ -159,6 +163,18 @@ export function WindowsDesktop({
               kind="email"
               active={app === "email"}
               onClick={() => setApp("email")}
+            />
+            <DesktopIcon
+              label="PPPoE"
+              kind="pppoe"
+              active={app === "pppoe"}
+              onClick={() => setApp("pppoe")}
+            />
+            <DesktopIcon
+              label="VPN"
+              kind="vpn"
+              active={app === "vpn"}
+              onClick={() => setApp("vpn")}
             />
           </div>
 
@@ -273,6 +289,22 @@ export function WindowsDesktop({
                   onClose={() => setApp(null)}
                 />
               )}
+              {app === "pppoe" && (
+                <PppoeDialer
+                  device={device}
+                  stateRef={stateRef}
+                  setState={setState}
+                  onClose={() => setApp(null)}
+                />
+              )}
+              {app === "vpn" && (
+                <VpnClient
+                  device={device}
+                  stateRef={stateRef}
+                  setState={setState}
+                  onClose={() => setApp(null)}
+                />
+              )}
             </div>
           )}
 
@@ -327,6 +359,16 @@ export function WindowsDesktop({
                 Email
               </div>
             )}
+            {app === "pppoe" && (
+              <div className="rounded bg-slate-800 px-3 py-1 text-xs text-slate-200">
+                PPPoE
+              </div>
+            )}
+            {app === "vpn" && (
+              <div className="rounded bg-slate-800 px-3 py-1 text-xs text-slate-200">
+                VPN
+              </div>
+            )}
             <div className="ml-auto flex items-center gap-1 pr-1">
               <WifiTray
                 device={device}
@@ -358,7 +400,9 @@ function DesktopIcon({
     | "browser"
     | "editor"
     | "traffic"
-    | "email";
+    | "email"
+    | "pppoe"
+    | "vpn";
   active?: boolean;
   onClick: () => void;
 }) {
@@ -366,15 +410,22 @@ function DesktopIcon({
     <button
       type="button"
       onClick={onClick}
-      className={`flex w-[5.5rem] flex-col items-center gap-1 rounded p-2 text-center text-[11px] text-white drop-shadow ${
+      className={`flex w-[4.75rem] flex-col items-center gap-1 rounded-lg p-2 text-center text-[11px] text-white drop-shadow touch-manipulation sm:w-[5.5rem] ${
         active ? "bg-white/20 ring-1 ring-white/50" : "hover:bg-white/10"
       }`}
     >
-      <div className="flex h-10 w-10 items-center justify-center rounded bg-slate-900/40">
+      <div className="flex h-11 w-11 items-center justify-center rounded bg-slate-900/40 sm:h-10 sm:w-10">
         {kind === "cmd" ? (
           <span className="font-mono text-sm text-emerald-300">&gt;_</span>
         ) : kind === "svc" ? (
           <span className="text-sm font-bold text-amber-200">S</span>
+        ) : kind === "pppoe" ? (
+          <span className="text-[10px] font-bold text-violet-200">PPP</span>
+        ) : kind === "vpn" ? (
+          <svg viewBox="0 0 24 24" className="h-5 w-5 text-lime-100" fill="none" stroke="currentColor" strokeWidth="1.8">
+            <path d="M12 3l7 4v5c0 5-3 8-7 9-4-1-7-4-7-9V7z" />
+            <path d="M9 12l2 2 4-4" />
+          </svg>
         ) : kind === "email" ? (
           <svg viewBox="0 0 24 24" className="h-5 w-5 text-rose-100" fill="none" stroke="currentColor" strokeWidth="1.8">
             <rect x="3" y="5" width="18" height="14" rx="1.5" />

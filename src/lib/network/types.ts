@@ -113,6 +113,9 @@ export type InterfaceConfig = {
   /** Named ACL applied inbound / outbound (standard numbered ACL) */
   aclIn: number | null;
   aclOut: number | null;
+  /** STP: porta bloccata non inoltra frame */
+  stpState?: "forwarding" | "blocking";
+  stpRole?: "root" | "designated" | "alternate" | "disabled";
 };
 
 export type AclAction = "permit" | "deny";
@@ -213,6 +216,29 @@ export type Device = {
   ntpServerId?: string;
   /** Immagini flash ricevute via TFTP (simulato) */
   flashImages?: { name: string; sizeKb: number }[];
+  /** AAA client verso Server-PT (router/switch) */
+  aaaConfig?: {
+    newModel: boolean;
+    authEnable: boolean;
+    serverIp: string;
+    secret: string;
+    type: "radius" | "tacacs";
+  };
+  /** Sessione PPPoE host */
+  pppoe?: {
+    connected: boolean;
+    serverIp: string;
+    username: string;
+    virtualIp?: string;
+  };
+  /** Sessione VPN host */
+  vpn?: {
+    connected: boolean;
+    serverIp: string;
+    groupName: string;
+    username: string;
+    virtualIp?: string;
+  };
 };
 
 export type DhcpLease = {

@@ -128,9 +128,19 @@ export function defaultServerServices(name: string): DeviceServices {
     },
     syslog: { enabled: true, entries: [] },
     aaa: {
-      enabled: false,
-      clients: [],
-      users: [{ username: "admin", password: "cisco" }],
+      enabled: true,
+      clients: [
+        {
+          name: "lab-routers",
+          ip: "0.0.0.0",
+          secret: "cisco",
+          type: "radius",
+        },
+      ],
+      users: [
+        { username: "admin", password: "cisco" },
+        { username: "cisco", password: "cisco" },
+      ],
     },
     ntp: {
       enabled: true,

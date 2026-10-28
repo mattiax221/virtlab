@@ -11,6 +11,7 @@ import {
   formatInterfacesStatus,
   formatInterfacesTrunk,
   formatMacTable,
+  formatSpanningTree,
   formatVlanBrief,
   l2Flood,
 } from "./l2";
@@ -20,6 +21,7 @@ import {
   requestDhcp,
   resolveDnsQuery,
 } from "./services";
+import { authenticateAaa } from "./aaa";
 import { syncNtp } from "./telemetry";
 import type { CommandResult, LabState, StaticRoute, VlanRecord } from "./types";
 
@@ -94,6 +96,8 @@ function helpRouter(): string {
     "  copy tftp flash <ip> <file>   Scarica IOS dal Server-PT TFTP",
     "  show flash                    Immagini in flash",
     "  ntp sync                      Sincronizza da Server-PT NTP",
+    "  aaa new-model / radius-server host <ip> key <secret>",
+    "  aaa authentication enable default group radius",
     "  help",
     "",
     "Inter-VLAN (router-on-a-stick):",
@@ -608,13 +612,17 @@ export type RouterCliMode =
   | "enable"
   | "config"
   | "config-if"
-  | "config-vlan";
+  | "config-vlan"
+  | "aaa-user"
+  | "aaa-pass";
 
 export type RouterCliState = {
   mode: RouterCliMode;
   ifaceId: string | null;
   vlanId: number | null;
   hostname: string;
+  aaaUser?: string;
+  prevMode?: RouterCliMode;
 };
 
 export function initialRouterCli(hostname: string): RouterCliState {
@@ -622,6 +630,8 @@ export function initialRouterCli(hostname: string): RouterCliState {
 }
 
 export function routerPrompt(cli: RouterCliState): string {
+  if (cli.mode === "aaa-user") return "Username: ";
+  if (cli.mode === "aaa-pass") return "Password: ";
   if (cli.mode === "user") return `${cli.hostname}>`;
   if (cli.mode === "enable") return `${cli.hostname}#`;
   if (cli.mode === "config") return `${cli.hostname}(config)#`;
@@ -635,6 +645,7 @@ function helpSwitch(): string {
     "  enable",
     "  show vlan brief",
     "  show mac address-table",
+    "  show spanning-tree",
     "  show interfaces status",
     "  show interfaces trunk",
     "  show ip interface brief",
@@ -686,13 +697,113 @@ export function runRouterCommand(
   }
   if (lower === "cls" || lower === "clear") return { output: "", clear: true };
 
+  if (cli.mode === "aaa-user") {
+    const user = line.trim();
+    if (!user) return { output: "Username: " };
+    setCli({ ...cli, mode: "aaa-pass", aaaUser: user });
+    return { output: "" };
+  }
+
+  if (cli.mode === "aaa-pass") {
+    const pass = line;
+    const user = cli.aaaUser ?? "";
+    const auth = authenticateAaa(ctx.state, device, user, pass);
+    ctx.setState(auth.state);
+    if (!auth.ok) {
+      setCli({ ...cli, mode: "user", aaaUser: undefined });
+      return { output: auth.message };
+    }
+    setCli({
+      ...cli,
+      mode: "enable",
+      aaaUser: undefined,
+    });
+    return { output: auth.message };
+  }
+
   if (lower === "enable") {
+    if (device.aaaConfig?.newModel && device.aaaConfig.authEnable) {
+      setCli({ ...cli, mode: "aaa-user", aaaUser: undefined });
+      return { output: "" };
+    }
     setCli({ ...cli, mode: "enable" });
     return { output: "" };
   }
 
   if (lower === "disable" || (lower === "exit" && cli.mode === "enable")) {
     setCli({ ...cli, mode: "user" });
+    return { output: "" };
+  }
+
+  if (lower === "aaa new-model" && cli.mode === "config") {
+    ctx.setState({
+      ...ctx.state,
+      devices: ctx.state.devices.map((d) =>
+        d.id === device.id
+          ? {
+              ...d,
+              aaaConfig: {
+                newModel: true,
+                authEnable: d.aaaConfig?.authEnable ?? false,
+                serverIp: d.aaaConfig?.serverIp ?? "",
+                secret: d.aaaConfig?.secret ?? "cisco",
+                type: d.aaaConfig?.type ?? "radius",
+              },
+            }
+          : d,
+      ),
+    });
+    return { output: "" };
+  }
+
+  if (lower.startsWith("radius-server host ") && cli.mode === "config") {
+    const ip = parts[2];
+    const keyIdx = parts.findIndex((p) => p.toLowerCase() === "key");
+    const secret = keyIdx >= 0 ? parts[keyIdx + 1] : "cisco";
+    if (!ip) return { output: "Uso: radius-server host <ip> key <secret>" };
+    ctx.setState({
+      ...ctx.state,
+      devices: ctx.state.devices.map((d) =>
+        d.id === device.id
+          ? {
+              ...d,
+              aaaConfig: {
+                newModel: d.aaaConfig?.newModel ?? true,
+                authEnable: d.aaaConfig?.authEnable ?? false,
+                serverIp: ip,
+                secret: secret ?? "cisco",
+                type: "radius",
+              },
+            }
+          : d,
+      ),
+    });
+    return { output: "" };
+  }
+
+  if (
+    (lower === "aaa authentication enable default group radius" ||
+      lower === "aaa authentication enable default group tacacs+") &&
+    cli.mode === "config"
+  ) {
+    const type = lower.includes("tacacs") ? "tacacs" : "radius";
+    ctx.setState({
+      ...ctx.state,
+      devices: ctx.state.devices.map((d) =>
+        d.id === device.id
+          ? {
+              ...d,
+              aaaConfig: {
+                newModel: true,
+                authEnable: true,
+                serverIp: d.aaaConfig?.serverIp ?? "",
+                secret: d.aaaConfig?.secret ?? "cisco",
+                type,
+              },
+            }
+          : d,
+      ),
+    });
     return { output: "" };
   }
 
@@ -1018,6 +1129,15 @@ export function runRouterCommand(
     (cli.mode === "enable" || cli.mode === "user")
   ) {
     return { output: formatMacTable(device) };
+  }
+
+  if (
+    (lower === "show spanning-tree" ||
+      lower === "show spanning-tree vlan 1" ||
+      lower === "show stp") &&
+    (cli.mode === "enable" || cli.mode === "user")
+  ) {
+    return { output: formatSpanningTree(device) };
   }
 
   if (

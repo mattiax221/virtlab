@@ -729,33 +729,34 @@ export function LabWorkspace() {
       className="flex h-screen flex-col overflow-hidden bg-[var(--lab-bg)] text-[var(--lab-fg)]"
       onContextMenu={(e) => e.preventDefault()}
     >
-      <header className="relative z-20 flex h-11 shrink-0 items-center gap-1.5 border-b border-[var(--lab-line)] bg-[var(--lab-panel)]/95 px-3 backdrop-blur">
+      <header className="relative z-20 flex min-h-11 shrink-0 flex-wrap items-center gap-1.5 border-b border-[var(--lab-line)] bg-[var(--lab-panel)]/95 px-2 py-1.5 backdrop-blur sm:px-3">
         <a
           href="/"
-          className="flex h-7 w-7 items-center justify-center rounded bg-sky-600 font-display text-xs font-bold text-white"
+          className="flex h-8 w-8 items-center justify-center rounded bg-sky-600 font-display text-xs font-bold text-white touch-manipulation sm:h-7 sm:w-7"
           title="Home"
         >
           NL
         </a>
-        <span className="mr-1 font-display text-sm font-semibold tracking-tight">
+        <span className="mr-1 hidden font-display text-sm font-semibold tracking-tight xs:inline sm:inline">
           NetLab
         </span>
         <a
-          href="/changelog"
-          className="mr-1 hidden rounded px-2 py-1 text-[11px] text-slate-400 hover:bg-slate-800 hover:text-sky-300 sm:inline"
-          title="Cronologia e cose da fare"
-        >
-          Changelog
-        </a>
-        <a
           href="/esercizi"
-          className="mr-1 hidden rounded px-2 py-1 text-[11px] text-slate-400 hover:bg-slate-800 hover:text-sky-300 sm:inline"
+          className="rounded px-2 py-1.5 text-[11px] text-slate-400 hover:bg-slate-800 hover:text-sky-300 touch-manipulation sm:py-1"
           title="Checklist esercizi lab"
         >
           Esercizi
         </a>
-        <div className="mx-1 h-4 w-px bg-slate-700" />
+        <a
+          href="/changelog"
+          className="hidden rounded px-2 py-1 text-[11px] text-slate-400 hover:bg-slate-800 hover:text-sky-300 sm:inline"
+          title="Cronologia e cose da fare"
+        >
+          Changelog
+        </a>
+        <div className="mx-1 hidden h-4 w-px bg-slate-700 sm:block" />
 
+        <div className="flex flex-wrap items-center gap-1">
         <ToolButton
           active={tool === "select"}
           onClick={() => {
@@ -781,7 +782,7 @@ export function LabWorkspace() {
           <select
             value={cableKind}
             onChange={(e) => setCableKind(e.target.value as CableKind)}
-            className="max-w-[10rem] rounded border border-slate-700 bg-slate-950 px-2 py-1 text-[11px] text-slate-200"
+            className="max-w-[9rem] rounded border border-slate-700 bg-slate-950 px-2 py-1.5 text-[11px] text-slate-200 sm:max-w-[10rem] sm:py-1"
             title={CABLE_META[cableKind].hint}
           >
             {(Object.keys(CABLE_META) as CableKind[]).map((k) => (
@@ -812,6 +813,7 @@ export function LabWorkspace() {
         >
           Simulation
         </ToolButton>
+        </div>
 
         <div className="ml-auto flex items-center gap-2">
           {(cableDraft || simFrom) && (
@@ -1554,7 +1556,7 @@ function ToolButton({
       type="button"
       title={title}
       onClick={onClick}
-      className={`rounded px-2.5 py-1 text-xs font-medium transition ${
+      className={`rounded px-2.5 py-1.5 text-xs font-medium transition touch-manipulation sm:py-1 ${
         active
           ? "bg-sky-600 text-white"
           : "text-slate-300 hover:bg-slate-800 hover:text-white"

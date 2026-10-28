@@ -40,12 +40,15 @@ export function linkNeighbors(
   const result: { iface: InterfaceConfig; end: L2Endpoint; link: Link }[] = [];
   for (const iface of device.interfaces) {
     if (!iface.connectedLinkId || !iface.enabled) continue;
+    if (iface.stpState === "blocking") continue;
     const link = state.links.find((l) => l.id === iface.connectedLinkId);
     if (!link || link.media === "console") continue;
     // Link rosso (cavo sbagliato / spento / no clock) non trasporta frame
     if (!isLinkPhysicallyUp(state, link)) continue;
     const end = otherEnd(state, link, deviceId);
-    if (end && end.iface.enabled) result.push({ iface, end, link });
+    if (end && end.iface.enabled && end.iface.stpState !== "blocking") {
+      result.push({ iface, end, link });
+    }
   }
   return result;
 }
@@ -94,7 +97,7 @@ function learnMac(
 export function l2Flood(
   state: LabState,
   startDeviceId: string,
-  opts?: { sourceMac?: string; vlanHint?: number },
+  opts?: { sourceMac?: string; destMac?: string; vlanHint?: number },
 ): { hosts: L2Endpoint[]; state: LabState } {
   let nextState = state;
   const hosts: L2Endpoint[] = [];
@@ -160,6 +163,16 @@ export function l2Flood(
       let vlan = node.vlan;
 
       if (isManagedSwitch(device.type)) {
+        // Unicast: se destMac è in tabella, esci solo da quella porta
+        if (opts?.destMac && vlan != null) {
+          const live = getDevice(nextState, device.id);
+          const hit = live?.macTable?.find(
+            (e) =>
+              e.mac.toLowerCase() === opts.destMac!.toLowerCase() &&
+              e.vlan === vlan,
+          );
+          if (hit && hit.portId !== iface.id) continue;
+        }
         // Leaving this switch via iface
         if (vlan == null) {
           // First hop into a switch from a host: VLAN = access/native of the
@@ -270,6 +283,27 @@ export function l2Flood(
   });
 
   return { hosts: refreshed, state: nextState };
+}
+
+export function formatSpanningTree(device: Device): string {
+  const lines = [
+    "VLAN0001",
+    "  Spanning tree enabled protocol ieee (NetLab semplificato)",
+    "",
+    "Interface           Role Sts Cost  Prio.Nbr Type",
+    "------------------- ---- --- ----- -------- ----------------",
+  ];
+  const ports = device.interfaces.filter(
+    (i) => !i.parentIfaceId && i.media !== "wireless",
+  );
+  for (const i of ports) {
+    const role = (i.stpRole ?? "designated").slice(0, 4).padEnd(4);
+    const sts = i.stpState === "blocking" ? "BLK" : "FWD";
+    lines.push(
+      `${i.name.padEnd(20)}${role} ${sts}  19    128.1    P2p`,
+    );
+  }
+  return lines.join("\n");
 }
 
 export function formatMacTable(device: Device): string {

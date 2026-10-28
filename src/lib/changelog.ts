@@ -242,6 +242,19 @@ export const releases: ChangelogEntry[] = [
     detail:
       "Email SMTP/POP3 sul Desktop (admin/studente); sui router copy tftp flash e show flash.",
   },
+  {
+    sha: "c08243f",
+    date: "2026-10-28",
+    title: "Esercizi su pagina dedicata",
+    detail: "Checklist lab spostata da overlay canvas a /esercizi (legge autosave).",
+  },
+  {
+    sha: "pending",
+    date: "2026-10-28",
+    title: "AAA, STP/unicast, PPPoE/VPN, mobile",
+    detail:
+      "Enable con RADIUS; STP semplificato + MAC unicast; PPPoE/VPN Desktop; header/desktop touch-friendly.",
+  },
 ];
 
 /** Roadmap / cose da fare (aggiornare quando si completa un item). */
@@ -279,13 +292,6 @@ export const todos: TodoItem[] = [
     status: "done",
   },
   {
-    id: "deploy-virt-lab",
-    title: "Sync su virt-lab + deploy Vercel",
-    detail:
-      "Far arrivare main aggiornato su aasda-add/virt-lab e ridistribuire virt-lab-wheat.vercel.app (cloud agent: 403 sul push).",
-    status: "todo",
-  },
-  {
     id: "email-client",
     title: "Client EMAIL sul Desktop",
     detail:
@@ -300,28 +306,36 @@ export const todos: TodoItem[] = [
     status: "done",
   },
   {
+    id: "aaa-auth",
+    title: "AAA su login CLI router",
+    detail:
+      "`aaa new-model` + `radius-server host` + enable chiede user/pass verso Server-PT AAA.",
+    status: "done",
+  },
+  {
     id: "stp-unicast",
     title: "STP e MAC unicast più fedeli",
     detail:
-      "Spanning Tree semplificato e forwarding unicast basato sulla tabella MAC (meno flood).",
-    status: "todo",
-  },
-  {
-    id: "aaa-auth",
-    title: "AAA su login CLI router",
-    detail: "Autenticazione RADIUS/TACACS verso il Server-PT per enable/login.",
-    status: "todo",
+      "STP semplificato su loop switch↔switch; unicast se MAC in tabella; `show spanning-tree`.",
+    status: "done",
   },
   {
     id: "vpn-pppoe",
     title: "PPPoE Dialer e VPN Desktop",
-    detail: "Utility Desktop mancanti dalle docs Configuring Servers / PCs.",
-    status: "todo",
+    detail: "Utility Desktop PPPoE e VPN (Connect/Disconnect, IP virtuale).",
+    status: "done",
   },
   {
     id: "mobile-polish",
     title: "Usabilità touch / schermi piccoli",
-    detail: "Palette, cavi e desktop più comodi su tablet/telefono.",
+    detail: "Header wrap, target più grandi, desktop a schermo intero su mobile.",
+    status: "done",
+  },
+  {
+    id: "deploy-virt-lab",
+    title: "Sync su virt-lab + deploy Vercel",
+    detail:
+      "Far arrivare main aggiornato su aasda-add/virt-lab e ridistribuire virt-lab-wheat.vercel.app (cloud agent: 403 sul push).",
     status: "todo",
   },
 ];
