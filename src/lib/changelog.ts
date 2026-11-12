@@ -362,7 +362,7 @@ export const releases: ChangelogEntry[] = [
       "Repo pubblico https://github.com/mattiax221/virtlab — codice pubblicato su main.",
   },
   {
-    sha: "pending",
+    sha: "45a98f6",
     date: "2026-11-12",
     title: "Config hub e Wi‑Fi",
     detail:
