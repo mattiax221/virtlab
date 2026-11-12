@@ -45,8 +45,11 @@ import {
 import {
   DEVICE_META,
   isEndHost,
+  isHubDevice,
   isL3Device,
   isWifiCapable,
+  isWirelessClient,
+  isWlc,
   type Device,
   type DeviceKind,
   type LabState,
@@ -61,10 +64,12 @@ import { DeviceIcon } from "./DeviceIcon";
 import { PortPicker } from "./PortPicker";
 import { RouterConsole } from "./RouterConsole";
 import { SimOverlay } from "./SimOverlay";
+import { HubPanel } from "./HubPanel";
 import { PrinterPanel } from "./PrinterPanel";
 import { SimpleDevicePanel } from "./SimpleDevicePanel";
 import { SwitchPanel } from "./SwitchPanel";
 import { WifiApPanel } from "./WifiApPanel";
+import { WifiClientPanel } from "./WifiClientPanel";
 import { WindowsDesktop } from "./WindowsDesktop";
 
 type Tool = "select" | "cable" | "delete" | "simulate";
@@ -75,7 +80,15 @@ type CableDraft = {
   fromIfaceId: string | null;
   toDeviceId: string | null;
 };
-type OpenMode = "sim" | "panel" | "switch" | "router" | "wifi" | "printer";
+type OpenMode =
+  | "sim"
+  | "panel"
+  | "switch"
+  | "router"
+  | "wifi"
+  | "wificlient"
+  | "hub"
+  | "printer";
 
 type CtxTarget =
   | { kind: "device"; id: string }
@@ -96,21 +109,20 @@ const CATEGORY_LABELS: Record<string, string> = {
 };
 
 function modeFor(device: Device): OpenMode {
+  if (isHubDevice(device.type)) return "hub";
   if (
     device.type === "switch" ||
-    device.type === "hub" ||
     device.type === "bridge" ||
-    device.type === "repeater" ||
     device.type.startsWith("switch_")
   ) {
     return "switch";
   }
-  // Home / wireless router: CLI L3 (IP LAN, rotte) — Wi‑Fi dal menu contestuale
+  // AP, router wireless e WLC: pannello radio / IP. La CLI resta nel menu.
+  if (isWifiCapable(device.type) || isWlc(device.type)) {
+    return "wifi";
+  }
   if (isL3Device(device.type)) {
     return "router";
-  }
-  if (isWifiCapable(device.type)) {
-    return "wifi";
   }
   if (
     device.type === "pc" ||
@@ -122,6 +134,9 @@ function modeFor(device: Device): OpenMode {
   }
   if (device.type === "printer") {
     return "printer";
+  }
+  if (isWirelessClient(device.type)) {
+    return "wificlient";
   }
   return "panel";
 }
@@ -559,12 +574,12 @@ export function LabWorkspace() {
           ? [
               {
                 type: "item" as const,
-                label: "Configura Wi‑Fi…",
+                label: "Console CLI…",
                 onClick: () => {
                   setCtx(null);
                   setOpenDeviceId(d.id);
                   setSelectedId(d.id);
-                  setOpenMode("wifi");
+                  setOpenMode("router");
                 },
               },
             ]
@@ -1543,7 +1558,29 @@ export function LabWorkspace() {
       )}
       {openDevice && openMode === "wifi" && (
         <WifiApPanel
+          key={openDevice.id}
           device={openDevice}
+          state={state}
+          stateRef={stateRef}
+          setState={setState}
+          onClose={closeOpen}
+        />
+      )}
+      {openDevice && openMode === "wificlient" && (
+        <WifiClientPanel
+          key={openDevice.id}
+          device={openDevice}
+          state={state}
+          stateRef={stateRef}
+          setState={setState}
+          onClose={closeOpen}
+        />
+      )}
+      {openDevice && openMode === "hub" && (
+        <HubPanel
+          key={openDevice.id}
+          device={openDevice}
+          state={state}
           stateRef={stateRef}
           setState={setState}
           onClose={closeOpen}

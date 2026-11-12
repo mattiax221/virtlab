@@ -6,6 +6,7 @@ import type {
   LabState,
   Link,
   WifiRadio,
+  WifiSecurity,
 } from "./types";
 
 /** Local uid to avoid circular import with engine */
@@ -52,6 +53,31 @@ export function isWifiAp(type: DeviceKind): boolean {
   );
 }
 
+export const WIFI_CHANNELS: Record<WifiRadio["band"], number[]> = {
+  "2.4": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13],
+  "5": [
+    36, 40, 44, 48, 52, 56, 60, 64, 100, 104, 108, 112, 116, 120, 124, 128,
+    132, 136, 140, 149, 153, 157, 161, 165,
+  ],
+};
+
+export function wifiSecurityLabel(security: WifiSecurity): string {
+  switch (security) {
+    case "open":
+      return "Aperta";
+    case "wep":
+      return "WEP";
+    case "wpa2":
+      return "WPA2-Personal";
+    case "wpa3":
+      return "WPA3-Personal";
+  }
+}
+
+export function wifiSecurityNeedsKey(security: WifiSecurity): boolean {
+  return security !== "open";
+}
+
 export function defaultWifiRadio(name: string): WifiRadio {
   return {
     ssid: `NetLab-${name}`,
@@ -67,6 +93,39 @@ export function clientWifiIface(device: Device): InterfaceConfig | undefined {
   return device.interfaces.find(
     (i) => i.media === "wireless" && !i.parentIfaceId && i.enabled,
   );
+}
+
+/** Scheda Wi‑Fi anche se la radio è in shutdown. */
+export function clientWifiIfaceAny(device: Device): InterfaceConfig | undefined {
+  return device.interfaces.find(
+    (i) => i.media === "wireless" && !i.parentIfaceId,
+  );
+}
+
+/**
+ * Motivo per cui un'associazione wireless non trasporta frame.
+ * `wifiKey` assente = lab precedente: la chiave non viene ricontrollata.
+ */
+export function wirelessLinkProblem(
+  a: Device,
+  b: Device,
+  link: Link,
+): string | null {
+  if (link.media !== "wireless") return null;
+  for (const dev of [a, b]) {
+    if (!isWifiAp(dev.type)) continue;
+    const radio = dev.wifi;
+    if (!radio?.enabled) return `Radio Wi‑Fi disattivata su ${dev.name}`;
+    if (!radio.ssid.trim()) return `SSID vuoto su ${dev.name}`;
+    if (
+      wifiSecurityNeedsKey(radio.security) &&
+      link.wifiKey !== undefined &&
+      link.wifiKey !== radio.password
+    ) {
+      return `Chiave Wi‑Fi non valida per «${radio.ssid}»`;
+    }
+  }
+  return null;
 }
 
 export function apWifiIface(device: Device): InterfaceConfig | undefined {
@@ -131,19 +190,47 @@ export function scanWifiNetworks(
   return list.sort((a, b) => b.signal - a.signal || a.ssid.localeCompare(b.ssid));
 }
 
+function dropWirelessLinks(state: LabState, deviceId: string): LabState {
+  const ids = state.links
+    .filter(
+      (l) =>
+        l.media === "wireless" &&
+        (l.aDeviceId === deviceId || l.bDeviceId === deviceId),
+    )
+    .map((l) => l.id);
+  let next = state;
+  for (const id of ids) next = deleteLinkLocal(next, id);
+  return next;
+}
+
 export function updateWifiRadio(
   state: LabState,
   deviceId: string,
   patch: Partial<WifiRadio>,
 ): LabState {
-  return {
+  const before = getDevice(state, deviceId);
+  if (!before) return state;
+  const prev = before.wifi ?? defaultWifiRadio(before.name);
+  const next: LabState = {
     ...state,
     devices: state.devices.map((d) => {
       if (d.id !== deviceId) return d;
       const base = d.wifi ?? defaultWifiRadio(d.name);
-      return { ...d, wifi: { ...base, ...patch } };
+      const wifi: WifiRadio = { ...base, ...patch };
+      const channels = WIFI_CHANNELS[wifi.band];
+      if (!channels.includes(wifi.channel)) wifi.channel = channels[0];
+      return { ...d, wifi };
     }),
   };
+  const radio = getDevice(next, deviceId)?.wifi;
+  if (!radio) return next;
+  const turnedOff = prev.enabled && !radio.enabled;
+  const credsChanged =
+    radio.ssid !== prev.ssid ||
+    radio.security !== prev.security ||
+    radio.password !== prev.password;
+  if (!turnedOff && !credsChanged) return next;
+  return dropWirelessLinks(next, deviceId);
 }
 
 export function disconnectWifi(
@@ -171,9 +258,10 @@ export function connectWifi(
   }
   const radio = ap.wifi;
   if (!radio?.enabled) return { state, error: "Radio Wi‑Fi disattivata sull’AP." };
-  if (radio.security === "wpa2") {
+  if (!radio.ssid.trim()) return { state, error: "L’AP non ha un SSID." };
+  if (wifiSecurityNeedsKey(radio.security)) {
     if ((password ?? "") !== radio.password) {
-      return { state, error: "Password Wi‑Fi non corretta." };
+      return { state, error: "Passphrase Wi‑Fi non corretta." };
     }
   }
 
@@ -212,6 +300,7 @@ export function connectWifi(
     bDeviceId: apId,
     bIfaceId: aIf.id,
     media: "wireless",
+    wifiKey: wifiSecurityNeedsKey(radio.security) ? (password ?? "") : "",
   };
 
   next = {

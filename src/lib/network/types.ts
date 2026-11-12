@@ -170,7 +170,7 @@ export type InstalledModule = {
   slot: number;
 };
 
-export type WifiSecurity = "open" | "wpa2";
+export type WifiSecurity = "open" | "wep" | "wpa2" | "wpa3";
 
 /** Broadcast Wi‑Fi settings on AP / wireless router */
 export type WifiRadio = {
@@ -453,6 +453,11 @@ export type Link = {
     | "coaxial"
     | "phone"
     | "wireless";
+  /**
+   * Passphrase presentata all’associazione.
+   * Assente sui lab salvati prima del controllo chiave (associazione già accettata).
+   */
+  wifiKey?: string;
 };
 
 export type LabState = {
@@ -598,6 +603,24 @@ export function isWifiCapable(type: DeviceKind): boolean {
     type === "wireless_router" ||
     type === "home_router" ||
     type === "home_gateway"
+  );
+}
+
+/** Hub, repeater e splitter coassiale (palette Hubs). */
+export function isHubDevice(type: DeviceKind): boolean {
+  return type === "hub" || type === "repeater" || type === "coaxial_splitter";
+}
+
+export function isWlc(type: DeviceKind): boolean {
+  return type === "wlc" || type === "wlc_2504" || type === "wlc_3504";
+}
+
+/** Client Wi‑Fi senza desktop (tablet, smartphone, generic wireless). */
+export function isWirelessClient(type: DeviceKind): boolean {
+  return (
+    type === "tablet" ||
+    type === "smartphone" ||
+    type === "generic_wireless"
   );
 }
 

@@ -361,11 +361,27 @@ export const releases: ChangelogEntry[] = [
     detail:
       "Repo pubblico https://github.com/mattiax221/virtlab — codice pubblicato su main.",
   },
+  {
+    sha: "pending",
+    date: "2026-11-12",
+    title: "Config hub e Wi‑Fi",
+    detail:
+      "Pannello hub/repeater/splitter (nome, porte, shutdown). Access point e router wireless: SSID, WEP/WPA2/WPA3, canale, radio e IP. Tablet, smartphone e generic wireless scelgono l’SSID; la chiave deve coincidere.",
+  },
 ];
 
 /** Roadmap NetLab — Packet Tracer didattico nel browser. */
 export const todos: TodoItem[] = [
   // —— Completato (base già in lab) ——
+  {
+    id: "hub-wifi-config",
+    title: "Config Hub e pannelli Wi‑Fi",
+    detail:
+      "Hub: nome e porte. AP/router: SSID, WEP/WPA2/WPA3, canale, radio, IP. Client wireless: scansione e associazione.",
+    status: "done",
+    epic: "l2l3",
+    horizon: "now",
+  },
   {
     id: "traffic-generator",
     title: "Traffic Generator / PDU dal Desktop",
