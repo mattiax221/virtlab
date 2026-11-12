@@ -16,6 +16,7 @@ import {
 } from "./modules";
 import { defaultServerServices, requestDhcp, resolveDnsName } from "./services";
 import { recomputeStp } from "./stp";
+import { isWifiAp, wifiSecurityLabel, wifiSecurityNeedsKey } from "./wifi";
 import { appendSyslog } from "./telemetry";
 import {
   DEVICE_META,
@@ -510,6 +511,25 @@ export function connectDevices(
   const compat = ifaceLinkCompatible(aIf, bIf, media);
   if (compat) return { state, error: compat };
 
+  if (media === "wireless") {
+    const apDev = isWifiAp(a.type) ? a : isWifiAp(b.type) ? b : null;
+    const radio = apDev?.wifi;
+    if (radio && (!radio.enabled || !radio.ssid.trim())) {
+      return {
+        state,
+        error: radio.enabled
+          ? "L’AP non ha un SSID."
+          : "Radio Wi‑Fi disattivata sull’AP.",
+      };
+    }
+    if (radio && wifiSecurityNeedsKey(radio.security)) {
+      return {
+        state,
+        error: `Rete «${radio.ssid}» protetta (${wifiSecurityLabel(radio.security)}): connetti dal pannello Wi‑Fi del client con la passphrase.`,
+      };
+    }
+  }
+
   // Cavo sbagliato: si collega lo stesso → LED rosso via evaluateLink, senza L2
 
   const link: Link = {
@@ -519,6 +539,7 @@ export function connectDevices(
     bDeviceId: b.id,
     bIfaceId: bIf.id,
     media,
+    ...(media === "wireless" ? { wifiKey: "" } : {}),
   };
 
   let next: LabState = {

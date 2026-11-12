@@ -8,6 +8,7 @@
  */
 import { inferCable, type CableKind } from "./catalog";
 import { getDevice, getIface } from "./engine-helpers";
+import { wirelessLinkProblem } from "./wifi";
 import {
   isAccessPoint,
   isEndHost,
@@ -239,6 +240,11 @@ export function evaluateLink(
       color: COLORS.down,
       reason: "Serial: manca clock rate sul DCE (line protocol down)",
     };
+  }
+
+  const wifiProblem = wirelessLinkProblem(a, b, link);
+  if (wifiProblem) {
+    return { health: "down", color: COLORS.down, reason: wifiProblem };
   }
 
   return {

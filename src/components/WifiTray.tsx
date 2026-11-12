@@ -6,6 +6,8 @@ import {
   connectWifi,
   disconnectWifi,
   scanWifiNetworks,
+  wifiSecurityLabel,
+  wifiSecurityNeedsKey,
   wifiStatusLabel,
 } from "@/lib/network/wifi";
 import type { Device, LabState } from "@/lib/network/types";
@@ -132,15 +134,15 @@ export function WifiTray({
                           )}
                         </div>
                         <div className="text-[10px] text-slate-500">
-                          {n.security === "wpa2" ? "WPA2-Personal" : "Aperta"} ·
-                          ch {n.channel} · {n.band} GHz · segnale {n.signal}%
+                          {wifiSecurityLabel(n.security)} · ch {n.channel} ·{" "}
+                          {n.band} GHz · segnale {n.signal}%
                         </div>
                       </div>
                     </div>
 
                     {pendingAp === n.deviceId && !n.connected && (
                       <div className="mt-2 space-y-1.5">
-                        {n.security === "wpa2" && (
+                        {wifiSecurityNeedsKey(n.security) && (
                           <input
                             type="password"
                             value={password}
@@ -212,7 +214,7 @@ export function WifiTray({
                               setPendingAp(n.deviceId);
                               setPassword("");
                               setError(null);
-                              if (n.security === "open") {
+                              if (!wifiSecurityNeedsKey(n.security)) {
                                 const res = connectWifi(
                                   stateRef.current,
                                   live.id,

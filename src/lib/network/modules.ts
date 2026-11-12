@@ -410,6 +410,7 @@ export function interfacesFromModules(
   let se = 0;
   let wi = 0;
   let eth = 0;
+  let coax = 0;
 
   for (const mod of sorted) {
     const kind = mod.kind as ModuleKind;
@@ -444,9 +445,11 @@ export function interfacesFromModules(
         name = `GigabitEthernet1/${p + 1}`;
       } else if (def.kind === "ap_radio") {
         name = p === 0 ? "Port 0" : "Wireless0";
-      } else if (def.kind === "modem_eth") name = "Ethernet0";
-      else if (def.kind === "modem_wan")
-        name = type === "modem_cable" ? "Coaxial0" : "Modem0";
+      }       else if (def.kind === "modem_eth") name = "Ethernet0";
+      else if (def.kind === "modem_wan") {
+        if (type === "coaxial_splitter") name = `Coaxial${coax++}`;
+        else name = type === "modem_cable" ? "Coaxial0" : "Modem0";
+      }
       else name = `Ethernet${eth++}`;
 
       // For host_wifi unique naming if multiple
