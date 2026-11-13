@@ -390,7 +390,7 @@ export const releases: ChangelogEntry[] = [
       "Etichette delle porte senza sovrapposizioni e nomi interi. Su telefono la barra va a capo e la topologia si scorre. Le modifiche da console e pannelli e gli spostamenti si annullano con Annulla. Pannelli sempre allineati allo stato del lab. Comandi end e do come su IOS.",
   },
   {
-    sha: "PENDING",
+    sha: "c8bc34c",
     date: "2026-11-13",
     title: "Classi, lab online e consegne con verifica automatica",
     detail:
