@@ -43,6 +43,12 @@ export default function Home() {
             Apri il laboratorio
           </Link>
           <Link
+            href="/login"
+            className="rounded-md border border-slate-600 bg-slate-900/50 px-5 py-3 text-sm font-semibold text-slate-200 transition hover:border-sky-500/60 hover:text-sky-200"
+          >
+            Accedi
+          </Link>
+          <Link
             href="/esercizi"
             className="rounded-md border border-slate-600 bg-slate-900/50 px-5 py-3 text-sm font-semibold text-slate-200 transition hover:border-sky-500/60 hover:text-sky-200"
           >

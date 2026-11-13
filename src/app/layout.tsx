@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { IBM_Plex_Mono, Manrope, Syne } from "next/font/google";
+import { AuthPresence } from "@/components/AuthPresence";
 import "./globals.css";
 
 const body = Manrope({
@@ -30,7 +31,10 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       lang="it"
       className={`${body.variable} ${display.variable} ${mono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col font-sans">{children}</body>
+      <body className="min-h-full flex flex-col font-sans">
+        <AuthPresence />
+        {children}
+      </body>
     </html>
   );
 }

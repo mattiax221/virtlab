@@ -42,6 +42,41 @@ npm run dev
 
 Lab: [http://127.0.0.1:43127/lab](http://127.0.0.1:43127/lab)
 
+Senza variabili Supabase il lab parte comunque in modalità ospite
+(«Continua senza account»).
+
+## Account (Supabase)
+
+Copia `.env.example` in `.env.local` e, su Vercel, imposta le stesse variabili
+prima del deploy:
+
+| Variabile | Dove |
+|---|---|
+| `NEXT_PUBLIC_SUPABASE_URL` | client e server |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | client e server (chiave anon, non mostrarla in pagina) |
+| `SUPABASE_SERVICE_ROLE_KEY` | solo server, per eliminare o bloccare l’utente Auth da `/admin` |
+
+In Authentication → URL Configuration aggiungi il redirect
+`https://<dominio>/auth/callback` (in locale `http://127.0.0.1:43127/auth/callback`).
+
+Applica lo schema con il file
+`supabase/migrations/20261113120000_profiles.sql`
+(SQL editor di Supabase, oppure `supabase db push`).
+
+Ruoli: `user` (laboratorio), `viewer` (stesso accesso al lab, non è admin),
+`admin` (pagina `/admin`).
+
+**Primo amministratore:** registrati dall’app, poi nel SQL editor:
+
+```sql
+update public.profiles
+set role = 'admin'
+where email = 'tuo@indirizzo.it';
+```
+
+Quel comando gira senza sessione utente, quindi può impostare il ruolo.
+Un utente normale non può cambiare `role` dal client.
+
 Gateway opzionale (stesso origine): `npm run gateway` → porta 43130.
 
 ## Pubblicazione (GitHub + Vercel)

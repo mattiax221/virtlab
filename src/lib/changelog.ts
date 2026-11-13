@@ -368,6 +368,13 @@ export const releases: ChangelogEntry[] = [
     detail:
       "Pannello hub/repeater/splitter (nome, porte, shutdown). Access point e router wireless: SSID, WEP/WPA2/WPA3, canale, radio e IP. Tablet, smartphone e generic wireless scelgono l’SSID; la chiave deve coincidere.",
   },
+  {
+    sha: "b44860d",
+    date: "2026-11-13",
+    title: "Accesso account e amministrazione",
+    detail:
+      "Login, registrazione e reset password. Ospite senza account. Tabella profiles e pagina /admin (ruoli, presenza, disattiva, elimina). Nessuna chiave in pagina.",
+  },
 ];
 
 /** Roadmap NetLab — Packet Tracer didattico nel browser. */
