@@ -62,12 +62,14 @@ prima del deploy:
 In Authentication → URL Configuration aggiungi il redirect
 `https://<dominio>/auth/callback` (in locale `http://127.0.0.1:43127/auth/callback`).
 
-Applica lo schema con il file
-`supabase/migrations/20261113120000_profiles.sql`
-(SQL editor di Supabase, oppure `supabase db push`).
+Applica lo schema con i due file, in ordine
+(SQL editor di Supabase, oppure `supabase db push`):
 
-Ruoli: `user` (laboratorio), `viewer` (stesso accesso al lab, non è admin),
-`admin` (pagina `/admin`).
+1. `supabase/migrations/20261113120000_profiles.sql`
+2. `supabase/migrations/20261113130000_classi_lab_consegne.sql`
+
+Ruoli: `user` (allievo), `teacher` (docente), `admin` (amministratore).
+Il vecchio ruolo `viewer` diventa `teacher` con la seconda migrazione.
 
 **Primo amministratore:** registrati dall’app, poi nel SQL editor:
 
@@ -79,6 +81,25 @@ where email = 'tuo@indirizzo.it';
 
 Quel comando gira senza sessione utente, quindi può impostare il ruolo.
 Un utente normale non può cambiare `role` dal client.
+
+### Classi, lab online e consegne
+
+- **I miei lab** (pulsante nel laboratorio, solo con account): salva il lab
+  sul server, riaprilo da qualsiasi PC; il lab aperto si salva da solo.
+- **Classi**: il docente crea una classe e ottiene un **codice**. L’allievo
+  lo inserisce quando si registra (campo “Codice classe”) oppure da
+  *I miei lab → Classi*. Il docente può anche aggiungere utenti per email.
+- **Consegne**: il docente assegna un esercizio a una classe, con scadenza e
+  **verifiche automatiche** (il ping deve riuscire / essere bloccato, la
+  pagina web si apre, l’IP arriva via DHCP). L’allievo apre la consegna,
+  preme *Verifica* per vedere cosa manca e poi *Consegna*.
+- **Area docente / Amministrazione** (`/admin`): panoramica con grafici
+  (avanzamento per classe, errori più frequenti, attività), classi con
+  codice e membri, esito di ogni allievo con il motivo degli errori,
+  lab dell’allievo in sola lettura (`/lab/vedi/<id>`), esportazione CSV per Excel.
+  Le verifiche si ricalcolano sul server dal lab consegnato.
+- Il docente vede solo le sue classi; l’amministratore vede tutto e gestisce
+  ruoli e account.
 
 Gateway opzionale (stesso origine): `npm run gateway` → porta 43130.
 

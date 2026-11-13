@@ -12,6 +12,7 @@ import {
   deleteLink,
   moveDevice,
   nextDeviceName,
+  reserveIdsFrom,
 } from "@/lib/network/engine";
 import { CABLE_META, PT_PALETTE, type CableKind } from "@/lib/network/catalog";
 import {
@@ -67,6 +68,11 @@ import { PortPicker } from "./PortPicker";
 import { RouterConsole } from "./RouterConsole";
 import { SimOverlay } from "./SimOverlay";
 import { AccountChip } from "./AccountChip";
+import { AssignmentBar } from "./AssignmentBar";
+import { CloudIcon, CloudPanel } from "./CloudPanel";
+import { getMe, saveLab, submitAssignment, type Me } from "@/lib/classroom/client";
+import type { AssignmentRow } from "@/lib/classroom/types";
+import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { HubPanel } from "./HubPanel";
 import { PrinterPanel } from "./PrinterPanel";
 import { SimpleDevicePanel } from "./SimpleDevicePanel";
@@ -217,8 +223,15 @@ function layoutPortLabels(
   return out;
 }
 
-export function LabWorkspace() {
-  const [state, setState] = useState<LabState>(() => createEmptyLab());
+export type LabViewOnly = {
+  state: LabState;
+  title: string;
+  subtitle?: string;
+  backHref?: string;
+};
+
+export function LabWorkspace({ viewOnly }: { viewOnly?: LabViewOnly } = {}) {
+  const [state, setState] = useState<LabState>(() => viewOnly?.state ?? createEmptyLab());
   const stateRef = useRef(state);
   const bootDoneRef = useRef(false);
   useEffect(() => {
@@ -303,8 +316,9 @@ export function LabWorkspace() {
   }, []);
 
   // Boot: share URL > autosave prompt > lab vuoto
+  // (in sola lettura niente boot: l’autosave resta spento)
   useEffect(() => {
-    if (shareLoadedRef.current) return;
+    if (shareLoadedRef.current || viewOnly) return;
     shareLoadedRef.current = true;
     void (async () => {
       const param = readShareParamFromLocation();
@@ -346,7 +360,54 @@ export function LabWorkspace() {
       }
       bootDoneRef.current = true;
     })();
-  }, [showToast]);
+  }, [showToast, viewOnly]);
+
+  // ---- Account e lab salvati online ----
+  const [me, setMe] = useState<Me | null>(null);
+  const [cloud, setCloud] = useState<{
+    id: string;
+    name: string;
+    assignment: AssignmentRow | null;
+  } | null>(null);
+  const [cloudStatus, setCloudStatus] = useState("");
+  const [cloudPanel, setCloudPanel] = useState<null | "labs" | "assignments">(null);
+  const [showAssignment, setShowAssignment] = useState(true);
+  const cloudSavedFp = useRef("");
+  useEffect(() => {
+    if (viewOnly || !isSupabaseConfigured()) return;
+    let alive = true;
+    void getMe().then((m) => {
+      if (alive) setMe(m);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [viewOnly]);
+  // Salvataggio automatico del lab online collegato (1,5 s dopo l’ultima modifica)
+  useEffect(() => {
+    if (!cloud) return;
+    const fp = configFingerprint(state);
+    if (fp === cloudSavedFp.current) return;
+    const id = cloud.id;
+    const t = window.setTimeout(() => {
+      setCloudStatus("salvataggio…");
+      void saveLab(id, state).then((r) => {
+        if (r.ok) {
+          cloudSavedFp.current = fp;
+          setCloudStatus("salvato online");
+        } else {
+          setCloudStatus("non salvato");
+          showToast(r.error);
+        }
+      });
+    }, 1500);
+    return () => window.clearTimeout(t);
+  }, [state, cloud, showToast]);
+  /** Il canvas cambia lab: smette di salvare su quello online */
+  const detachCloud = useCallback(() => {
+    setCloud(null);
+    setCloudStatus("");
+  }, [setCloud, setCloudStatus]);
 
   const pushHistory = useCallback((base?: LabState) => {
     historyRef.current = [
@@ -467,13 +528,14 @@ export function LabWorkspace() {
       return;
     }
     applyState(createEmptyLab());
+    detachCloud();
     clearAutosave();
     setOpenDeviceId(null);
     setOpenMode(null);
     setSelectedId(null);
     setCableDraft(null);
     showToast("Nuovo lab vuoto");
-  }, [applyState, showToast]);
+  }, [applyState, showToast, detachCloud]);
 
   const addDeviceAt = useCallback(
     (type: DeviceKind, x?: number, y?: number) => {
@@ -799,6 +861,7 @@ export function LabWorkspace() {
         label: "Carica demo LAN",
         onClick: () => {
           applyState(createDemoLab());
+          detachCloud();
           closeOpen();
           showToast("Demo LAN");
         },
@@ -851,6 +914,7 @@ export function LabWorkspace() {
     confirmNewLab,
     undo,
     redo,
+    detachCloud,
   ]);
 
   useEffect(() => {
@@ -1114,6 +1178,7 @@ export function LabWorkspace() {
                 return;
               }
               applyState(parsed.state);
+              detachCloud();
               closeOpen();
               showToast("Lab caricato");
             }}
@@ -1121,6 +1186,7 @@ export function LabWorkspace() {
           <ToolButton
             onClick={() => {
               applyState(createDemoLab());
+              detachCloud();
               closeOpen();
               showToast("Demo LAN");
             }}
@@ -1128,6 +1194,24 @@ export function LabWorkspace() {
             Demo
           </ToolButton>
           <ToolButton onClick={confirmNewLab}>Nuovo</ToolButton>
+          {me && (
+            <button
+              type="button"
+              onClick={() => setCloudPanel("labs")}
+              title={cloud ? `Lab online: ${cloud.name} (${cloudStatus || "collegato"})` : "Salva e apri i lab online, consegne e classi"}
+              className="flex items-center gap-1.5 rounded-md bg-gradient-to-r from-sky-600 to-violet-600 px-2.5 py-1.5 text-xs font-medium text-white hover:opacity-90 sm:py-1"
+            >
+              <CloudIcon className="h-4 w-4" />
+              {cloud ? (
+                <span className="max-w-[10rem] truncate">
+                  {cloud.name}
+                  <span className="ml-1 text-[10px] text-white/70">{cloudStatus}</span>
+                </span>
+              ) : (
+                "I miei lab"
+              )}
+            </button>
+          )}
         </div>
         <div className="ml-auto">
           <AccountChip />
@@ -1521,6 +1605,38 @@ export function LabWorkspace() {
             />
           )}
 
+          {viewOnly && (
+            <div className="absolute left-1/2 top-3 z-30 flex max-w-[calc(100%-1.5rem)] -translate-x-1/2 flex-wrap items-center gap-2 rounded-xl border border-amber-400/40 bg-slate-950/95 px-3 py-2 text-xs shadow-xl">
+              <span className="rounded bg-amber-400 px-1.5 py-0.5 text-[10px] font-bold uppercase text-slate-950">
+                Sola lettura
+              </span>
+              <span className="font-medium text-slate-100">{viewOnly.title}</span>
+              {viewOnly.subtitle && <span className="text-slate-400">{viewOnly.subtitle}</span>}
+              <span className="text-slate-500">· puoi provare ping e comandi, nulla viene salvato</span>
+              {viewOnly.backHref && (
+                <Link href={viewOnly.backHref} className="rounded bg-slate-800 px-2 py-0.5 text-sky-200 hover:bg-slate-700">
+                  Torna indietro
+                </Link>
+              )}
+            </div>
+          )}
+          {cloud?.assignment && showAssignment && me && (
+            <AssignmentBar
+              assignment={cloud.assignment}
+              state={state}
+              saveStatus={cloudStatus}
+              onClose={() => setShowAssignment(false)}
+              onSubmit={async () => {
+                // salva subito l’ultima versione, poi consegna
+                const saved = await saveLab(cloud.id, stateRef.current);
+                if (!saved.ok) return saved.error;
+                cloudSavedFp.current = configFingerprint(stateRef.current);
+                setCloudStatus("salvato online");
+                const r = await submitAssignment(me, cloud.assignment!.id, cloud.id);
+                return r.ok ? null : r.error;
+              }}
+            />
+          )}
           {toast && (
             <div className="pointer-events-none absolute left-1/2 top-3 z-30 -translate-x-1/2 rounded-full border border-slate-600/80 bg-slate-900/95 px-4 py-1.5 text-sm text-slate-100 shadow-lg">
               {toast}
@@ -1674,6 +1790,32 @@ export function LabWorkspace() {
           y={ctx.y}
           items={menuItems}
           onClose={() => setCtx(null)}
+        />
+      )}
+
+      {cloudPanel && me && (
+        <CloudPanel
+          me={me}
+          current={state}
+          boundLabId={cloud?.id ?? null}
+          initialTab={cloudPanel}
+          onClose={() => setCloudPanel(null)}
+          onToast={showToast}
+          onOpen={(meta, data, assignment) => {
+            if (!data || !Array.isArray(data.devices) || !Array.isArray(data.links)) {
+              showToast("Lab online non leggibile.");
+              return;
+            }
+            reserveIdsFrom(data);
+            applyState(data);
+            closeOpen();
+            cloudSavedFp.current = configFingerprint(data);
+            setCloud({ id: meta.id, name: meta.name, assignment });
+            setCloudStatus("salvato online");
+            setShowAssignment(true);
+            setCloudPanel(null);
+            showToast(`Aperto: ${meta.name}`);
+          }}
         />
       )}
 

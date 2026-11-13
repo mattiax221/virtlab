@@ -8,7 +8,7 @@ import { isSupabaseConfigured } from "@/lib/supabase/env";
 
 type Chip = {
   label: string;
-  admin: boolean;
+  role: string;
 };
 
 export function AccountChip() {
@@ -35,7 +35,7 @@ export function AccountChip() {
         profile?.email ||
         data.user.email ||
         "Account";
-      setChip({ label, admin: profile?.role === "admin" });
+      setChip({ label, role: (profile?.role as string) ?? "user" });
     })();
     return () => {
       cancelled = true;
@@ -62,12 +62,12 @@ export function AccountChip() {
 
   return (
     <div className="flex items-center gap-1">
-      {chip.admin && (
+      {(chip.role === "admin" || chip.role === "teacher") && (
         <Link
           href="/admin"
           className="rounded px-2 py-1 text-[11px] text-amber-200 hover:bg-slate-800"
         >
-          Amministrazione
+          {chip.role === "admin" ? "Amministrazione" : "Area docente"}
         </Link>
       )}
       <span className="hidden max-w-[8rem] truncate text-[11px] text-slate-400 sm:inline">

@@ -24,6 +24,7 @@ export function LoginScreen({
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
+  const [classCode, setClassCode] = useState("");
   const [message, setMessage] = useState<string | null>(
     loginErrorMessage(errorCode),
   );
@@ -62,7 +63,11 @@ export function LoginScreen({
           email: email.trim(),
           password,
           options: {
-            data: { display_name: displayName.trim() },
+            data: {
+              display_name: displayName.trim(),
+              // il database iscrive subito l’allievo alla classe con questo codice
+              ...(classCode.trim() ? { class_code: classCode.trim().toUpperCase() } : {}),
+            },
             emailRedirectTo: `${window.location.origin}/auth/callback?next=/lab`,
           },
         });
@@ -151,6 +156,19 @@ export function LoginScreen({
                 onChange={(e) => setDisplayName(e.target.value)}
                 className={inputCls}
                 autoComplete="nickname"
+              />
+            </label>
+          )}
+          {mode === "register" && (
+            <label className="block space-y-1 text-xs text-slate-400">
+              Codice classe <span className="text-slate-500">(facoltativo, te lo dà il docente)</span>
+              <input
+                value={classCode}
+                onChange={(e) => setClassCode(e.target.value.toUpperCase())}
+                maxLength={12}
+                placeholder="Es. 7KQ4ZD"
+                className={`${inputCls} font-mono tracking-widest`}
+                autoComplete="off"
               />
             </label>
           )}

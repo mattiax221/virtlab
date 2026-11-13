@@ -389,6 +389,13 @@ export const releases: ChangelogEntry[] = [
     detail:
       "Etichette delle porte senza sovrapposizioni e nomi interi. Su telefono la barra va a capo e la topologia si scorre. Le modifiche da console e pannelli e gli spostamenti si annullano con Annulla. Pannelli sempre allineati allo stato del lab. Comandi end e do come su IOS.",
   },
+  {
+    sha: "PENDING",
+    date: "2026-11-13",
+    title: "Classi, lab online e consegne con verifica automatica",
+    detail:
+      "Ruolo Docente. Lab salvati sul server con salvataggio automatico. Classi con codice di iscrizione (anche in registrazione). Consegne con scadenza e verifiche automatiche: l’allievo verifica e consegna, il docente vede l’esito e il motivo degli errori e apre il lab in sola lettura. Nuova area docente/amministrazione con grafici, esportazione CSV per Excel, pulsante Esci; la pagina non si azzera più a ogni aggiornamento.",
+  },
 ];
 
 /** Roadmap NetLab — Packet Tracer didattico nel browser. */
