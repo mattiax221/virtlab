@@ -89,11 +89,12 @@ export function UsersPanel({
       </div>
 
       <div className="overflow-x-auto rounded-xl border border-slate-700/80">
-        <table className="w-full min-w-[52rem] text-left text-sm">
+        <table className="w-full min-w-[56rem] text-left text-sm">
           <thead className="bg-slate-900/80 text-[11px] uppercase tracking-wide text-slate-400">
             <tr>
               <th className="px-3 py-2 font-medium">Utente</th>
               <th className="px-3 py-2 font-medium">Classi</th>
+              <th className="px-3 py-2 font-medium">Lab</th>
               <th className="px-3 py-2 font-medium">Ruolo</th>
               <th className="px-3 py-2 font-medium">Stato</th>
               <th className="px-3 py-2 font-medium">Ultimo accesso</th>
@@ -103,7 +104,7 @@ export function UsersPanel({
           <tbody>
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={6} className="px-3 py-6 text-slate-500">
+                <td colSpan={isAdmin ? 7 : 6} className="px-3 py-6 text-slate-500">
                   Nessun utente.
                 </td>
               </tr>
@@ -112,6 +113,7 @@ export function UsersPanel({
               const self = user.id === data.me.id;
               const online =
                 !user.banned && (onlineIds.has(user.id) || isRecentlySeen(user.last_seen_at));
+              const labCount = data.labCounts[user.id] ?? 0;
               const initials = (user.display_name || user.email || "?")
                 .split(/[\s@.]+/)
                 .filter(Boolean)
@@ -148,6 +150,15 @@ export function UsersPanel({
                         </span>
                       ))}
                     </div>
+                  </td>
+                  <td className="px-3 py-2 text-xs tabular-nums text-slate-300">
+                    {labCount === 0 ? (
+                      <span className="text-slate-500">0</span>
+                    ) : (
+                      <span title="Laboratori salvati online">
+                        {labCount} {labCount === 1 ? "lab salvato" : "lab salvati"}
+                      </span>
+                    )}
                   </td>
                   <td className="px-3 py-2">
                     {isAdmin ? (

@@ -16,7 +16,7 @@ type Tab = "overview" | "classes" | "assignments" | "users";
 export function AdminApp({ data }: { data: AdminData }) {
   const router = useRouter();
   const isAdmin = data.me.role === "admin";
-  const [tab, setTab] = useState<Tab>("overview");
+  const [tab, setTab] = useState<Tab>(() => (data.missingSchema ? "users" : "overview"));
   const [message, setMessage] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [onlineIds, setOnlineIds] = useState<Set<string>>(() => new Set());
@@ -125,6 +125,19 @@ export function AdminApp({ data }: { data: AdminData }) {
 
   return (
     <div className="space-y-5">
+      {data.missingSchema && (
+        <div className="space-y-2 rounded-xl border border-amber-500/40 bg-amber-950/30 p-4 text-sm text-amber-100">
+          <p className="font-semibold">Manca la migrazione classi / consegne</p>
+          <p className="text-amber-100/80">
+            Puoi già gestire gli utenti. Per panoramica, classi e consegne applica{" "}
+            <code className="rounded bg-black/30 px-1">
+              supabase/migrations/20261113130000_classi_lab_consegne.sql
+            </code>{" "}
+            dall’SQL editor di Supabase, poi ricarica.
+          </p>
+        </div>
+      )}
+
       <nav className="flex flex-wrap gap-1 rounded-xl border border-slate-700/80 bg-slate-900/70 p-1">
         {tabs.map((t) => (
           <button

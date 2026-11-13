@@ -88,5 +88,12 @@ export type AdminData = {
   labActivity: string[];
   /** Lab di ogni consegna: chiave `${assignmentId}:${userId}` → id del lab */
   submissionLabs: Record<string, string>;
+  /** Quanti laboratori ha salvato ogni utente (owner_id → conteggio) */
+  labCounts: Record<string, number>;
   hasServiceRole: boolean;
+  /**
+   * True se le tabelle classi/consegne non ci sono ancora: l’area utenti
+   * resta disponibile, le altre schede mostrano il banner di migrazione.
+   */
+  missingSchema?: boolean;
 };
