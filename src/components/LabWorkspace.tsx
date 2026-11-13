@@ -64,6 +64,7 @@ import { DeviceIcon } from "./DeviceIcon";
 import { PortPicker } from "./PortPicker";
 import { RouterConsole } from "./RouterConsole";
 import { SimOverlay } from "./SimOverlay";
+import { AccountChip } from "./AccountChip";
 import { HubPanel } from "./HubPanel";
 import { PrinterPanel } from "./PrinterPanel";
 import { SimpleDevicePanel } from "./SimpleDevicePanel";
@@ -995,6 +996,9 @@ export function LabWorkspace() {
             Demo
           </ToolButton>
           <ToolButton onClick={confirmNewLab}>Nuovo</ToolButton>
+        </div>
+        <div className="ml-auto">
+          <AccountChip />
         </div>
       </header>
 
