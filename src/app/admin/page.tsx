@@ -1,7 +1,8 @@
 import Link from "next/link";
-import { AdminConsole } from "@/components/AdminConsole";
+import { AdminApp } from "@/components/admin/AdminApp";
 import { AdminFrame } from "@/components/AdminFrame";
-import { PROFILE_COLUMNS, type Profile } from "@/lib/profile";
+import { loadAdminData } from "@/lib/classroom/load";
+import { canManage, type ProfileRole } from "@/lib/profile";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { createServerSupabase } from "@/lib/supabase/server";
 
@@ -34,8 +35,8 @@ export default async function AdminPage() {
     return (
       <AdminFrame>
         <p className="max-w-lg text-sm text-slate-300">
-          Questa pagina è riservata agli amministratori. Accedi con un account
-          che ha il ruolo di amministratore.
+          Questa pagina è per docenti e amministratori. Accedi con un account
+          che ha uno di questi ruoli.
         </p>
         <Link
           href="/login?next=/admin"
@@ -57,18 +58,18 @@ export default async function AdminPage() {
     return (
       <AdminFrame>
         <p className="max-w-lg text-sm text-slate-300">
-          Impossibile leggere i profili. Applica la migrazione SQL del progetto
+          Impossibile leggere i profili. Applica le migrazioni SQL del progetto
           nel database, poi ricarica la pagina.
         </p>
       </AdminFrame>
     );
   }
 
-  if (!me || me.role !== "admin" || me.banned) {
+  if (!me || !canManage(me.role) || me.banned) {
     return (
       <AdminFrame>
         <p className="max-w-lg text-sm text-slate-300">
-          Solo gli amministratori possono aprire questa pagina.
+          Questa pagina è per docenti e amministratori.
         </p>
         <Link href="/lab" className="mt-4 inline-block text-sm text-sky-300">
           Torna al laboratorio
@@ -77,30 +78,38 @@ export default async function AdminPage() {
     );
   }
 
-  const { data, error } = await supabase!
-    .from("profiles")
-    .select(PROFILE_COLUMNS)
-    .order("created_at", { ascending: true });
+  const loaded = await loadAdminData(supabase!, {
+    id: user.id,
+    role: me.role as ProfileRole,
+  });
 
-  if (error) {
+  if (loaded.missingSchema) {
     return (
       <AdminFrame>
-        <p className="text-sm text-slate-300">
-          Elenco utenti non disponibile. Controlla le policy della tabella
-          profili.
-        </p>
+        <div className="max-w-xl space-y-3 rounded-xl border border-amber-500/40 bg-amber-950/30 p-5 text-sm text-amber-100">
+          <p className="font-semibold">Manca una parte del database</p>
+          <p className="text-amber-100/80">
+            Classi, laboratori salvati e consegne hanno bisogno della migrazione{" "}
+            <code className="rounded bg-black/30 px-1">
+              supabase/migrations/20261113130000_classi_lab_consegne.sql
+            </code>
+            . Applicala dall’SQL editor di Supabase, poi ricarica la pagina.
+          </p>
+        </div>
+      </AdminFrame>
+    );
+  }
+  if (!loaded.data) {
+    return (
+      <AdminFrame>
+        <p className="text-sm text-slate-300">{loaded.error ?? "Dati non disponibili."}</p>
       </AdminFrame>
     );
   }
 
-  const users = (data ?? []) as Profile[];
   return (
-    <AdminFrame>
-      <AdminConsole
-        key={users.map((u) => `${u.id}:${u.role}:${u.banned}:${u.last_seen_at}`).join("|")}
-        initialUsers={users}
-        selfId={user.id}
-      />
+    <AdminFrame role={me.role as ProfileRole}>
+      <AdminApp data={loaded.data} />
     </AdminFrame>
   );
 }

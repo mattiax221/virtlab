@@ -1,4 +1,15 @@
-export type ProfileRole = "user" | "viewer" | "admin";
+export type ProfileRole = "user" | "teacher" | "admin";
+
+export const ROLE_LABEL: Record<ProfileRole, string> = {
+  user: "Allievo",
+  teacher: "Docente",
+  admin: "Amministratore",
+};
+
+/** Può aprire /admin: docente o amministratore. */
+export function canManage(role: string | null | undefined): boolean {
+  return role === "teacher" || role === "admin";
+}
 
 export type Profile = {
   id: string;
