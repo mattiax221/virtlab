@@ -22,28 +22,80 @@ const ACTIVITY_DAYS = 14;
  * Le verifiche delle consegne si ricalcolano qui, sul lab consegnato, così
  * l’esito non dipende da ciò che il browser dell’allievo dichiara.
  */
+function emptyClassroom(): Pick<
+  AdminData,
+  | "classes"
+  | "members"
+  | "assignments"
+  | "submissions"
+  | "reports"
+  | "submissionLabs"
+  | "labActivity"
+  | "labCounts"
+> {
+  return {
+    classes: [],
+    members: [],
+    assignments: [],
+    submissions: [],
+    reports: {},
+    submissionLabs: {},
+    labActivity: [],
+    labCounts: {},
+  };
+}
+
+function countLabsByOwner(
+  rows: { owner_id: string | null }[] | null | undefined,
+): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const row of rows ?? []) {
+    if (!row.owner_id) continue;
+    counts[row.owner_id] = (counts[row.owner_id] ?? 0) + 1;
+  }
+  return counts;
+}
+
 export async function loadAdminData(
   supabase: SupabaseClient,
   me: { id: string; role: Profile["role"] },
 ): Promise<{ data?: AdminData; error?: string; missingSchema?: boolean }> {
   const since = new Date(Date.now() - ACTIVITY_DAYS * 24 * 60 * 60 * 1000).toISOString();
-  const [users, classes, members, assignments, submissions, activity] = await Promise.all([
-    supabase.from("profiles").select(PROFILE_COLUMNS).order("created_at", { ascending: true }),
-    supabase.from("classes").select("id,name,join_code,created_by,created_at").order("name"),
-    supabase.from("class_members").select("class_id,user_id,member_role,joined_at"),
-    supabase
-      .from("assignments")
-      .select("id,class_id,title,description,checks,due_at,created_by,created_at")
-      .order("created_at", { ascending: false }),
-    supabase.from("submissions").select("assignment_id,user_id,lab_id,submitted_at"),
-    supabase.from("labs").select("updated_at").gte("updated_at", since).limit(5000),
-  ]);
+  const [users, classes, members, assignments, submissions, activity, labsMeta] =
+    await Promise.all([
+      supabase.from("profiles").select(PROFILE_COLUMNS).order("created_at", { ascending: true }),
+      supabase.from("classes").select("id,name,join_code,created_by,created_at").order("name"),
+      supabase.from("class_members").select("class_id,user_id,member_role,joined_at"),
+      supabase
+        .from("assignments")
+        .select("id,class_id,title,description,checks,due_at,created_by,created_at")
+        .order("created_at", { ascending: false }),
+      supabase.from("submissions").select("assignment_id,user_id,lab_id,submitted_at"),
+      supabase.from("labs").select("updated_at").gte("updated_at", since).limit(5000),
+      supabase.from("labs").select("owner_id").limit(5000),
+    ]);
 
   if (users.error) return { error: "Elenco utenti non disponibile." };
+
+  const labCounts = labsMeta.error
+    ? {}
+    : countLabsByOwner(labsMeta.data as { owner_id: string | null }[] | null);
+  const profileUsers = (users.data ?? []) as Profile[];
+
   const schemaError = [classes, members, assignments, submissions, activity].find((r) => r.error);
   if (schemaError) {
-    // Tabelle mancanti: la seconda migrazione non è stata applicata
-    return { missingSchema: true, error: schemaError.error?.message };
+    // Tabelle classi/consegne assenti: resta comunque l’elenco utenti (+ lab se c’è).
+    return {
+      missingSchema: true,
+      data: {
+        me,
+        users: profileUsers,
+        ...emptyClassroom(),
+        labCounts,
+        hasServiceRole: hasServiceRole(),
+        missingSchema: true,
+      },
+    };
   }
 
   const assignmentRows: AssignmentRow[] = (assignments.data ?? []).map((a) => ({
@@ -82,7 +134,7 @@ export async function loadAdminData(
   return {
     data: {
       me,
-      users: (users.data ?? []) as Profile[],
+      users: profileUsers,
       classes: (classes.data ?? []) as ClassRow[],
       members: (members.data ?? []) as MemberRow[],
       assignments: assignmentRows,
@@ -90,6 +142,7 @@ export async function loadAdminData(
       reports,
       submissionLabs,
       labActivity: (activity.data ?? []).map((r) => r.updated_at as string),
+      labCounts,
       hasServiceRole: hasServiceRole(),
     },
   };

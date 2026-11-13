@@ -83,22 +83,6 @@ export default async function AdminPage() {
     role: me.role as ProfileRole,
   });
 
-  if (loaded.missingSchema) {
-    return (
-      <AdminFrame>
-        <div className="max-w-xl space-y-3 rounded-xl border border-amber-500/40 bg-amber-950/30 p-5 text-sm text-amber-100">
-          <p className="font-semibold">Manca una parte del database</p>
-          <p className="text-amber-100/80">
-            Classi, laboratori salvati e consegne hanno bisogno della migrazione{" "}
-            <code className="rounded bg-black/30 px-1">
-              supabase/migrations/20261113130000_classi_lab_consegne.sql
-            </code>
-            . Applicala dall’SQL editor di Supabase, poi ricarica la pagina.
-          </p>
-        </div>
-      </AdminFrame>
-    );
-  }
   if (!loaded.data) {
     return (
       <AdminFrame>

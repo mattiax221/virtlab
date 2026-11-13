@@ -396,6 +396,13 @@ export const releases: ChangelogEntry[] = [
     detail:
       "Ruolo Docente. Lab salvati sul server con salvataggio automatico. Classi con codice di iscrizione (anche in registrazione). Consegne con scadenza e verifiche automatiche: l’allievo verifica e consegna, il docente vede l’esito e il motivo degli errori e apre il lab in sola lettura. Nuova area docente/amministrazione con grafici, esportazione CSV per Excel, pulsante Esci; la pagina non si azzera più a ogni aggiornamento.",
   },
+  {
+    sha: "f130bc8",
+    date: "2026-11-13",
+    title: "Admin: utenti anche senza migrazione, conteggio lab",
+    detail:
+      "Se manca ancora la migrazione classi/consegne, l’amministrazione resta usabile sull’elenco utenti (con banner). Nella scheda Utenti compare quanti laboratori online ha salvato ciascuno.",
+  },
 ];
 
 /** Roadmap NetLab — Packet Tracer didattico nel browser. */
