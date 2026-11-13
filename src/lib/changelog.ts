@@ -369,7 +369,7 @@ export const releases: ChangelogEntry[] = [
       "Pannello hub/repeater/splitter (nome, porte, shutdown). Access point e router wireless: SSID, WEP/WPA2/WPA3, canale, radio e IP. Tablet, smartphone e generic wireless scelgono l’SSID; la chiave deve coincidere.",
   },
   {
-    sha: "pending",
+    sha: "b44860d",
     date: "2026-11-13",
     title: "Accesso account e amministrazione",
     detail:
