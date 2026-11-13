@@ -1,4 +1,6 @@
+import { formatAce, isExtendedAcl, isStandardAcl, parseAceTokens } from "./acl";
 import { formatArpTable, learnArp } from "./arp";
+import { formatStp, recomputeStp } from "./stp";
 import {
   createSubinterface,
   ensureSvi,
@@ -7,12 +9,11 @@ import {
   updateDevice,
   updateIface,
 } from "./engine";
-import { formatIp, isValidIp, maskToCidr, parseIp, parseMask } from "./ip";
+import { formatIp, isValidIp, maskToCidr, parseIp, parseMask, sameSubnet } from "./ip";
 import {
   formatInterfacesStatus,
   formatInterfacesTrunk,
   formatMacTable,
-  formatSpanningTree,
   formatVlanBrief,
   l2Flood,
   sviHasMemberLink,
@@ -28,6 +29,8 @@ import { sendPrintJob } from "./print";
 import { syncNtp } from "./telemetry";
 import {
   getHostOs,
+  isL3Device,
+  isManagedSwitch,
   type CommandResult,
   type LabState,
   type StaticRoute,
@@ -218,9 +221,12 @@ function helpRouter(): string {
     "  encapsulation dot1Q <vlan>",
     "  ip address <ip> <mask>",
     "  clock rate <bps>              Serial DCE (es. 64000)",
-    "  no shutdown",
-    "  access-list <n> permit|deny ip|icmp <src> <dst>",
+    "  no shutdown                   (le interfacce dei router partono spente)",
+    "  access-list <1-99> permit|deny <origine>                    ACL standard",
+    "  access-list <100-199> permit|deny ip|icmp|tcp|udp <origine> <dest> [eq porta]",
+    "     <origine>/<dest> = any | host A.B.C.D | A.B.C.D <wildcard>",
     "  ip access-group <n> in|out",
+    "  ip helper-address <ip>        Inoltra il DHCP al server (relay)",
     "  show access-lists",
     "  show arp / show ip arp    Tabella ARP",
     "  show ip route             Rotte connesse + statiche",
@@ -248,7 +254,9 @@ function helpRouter(): string {
     "  ip route 192.168.2.0 255.255.255.0 10.0.0.2",
     "",
     "WAN seriale: Physical → Serial WIC → cavo Serial → clock rate sul DCE",
-    "ACL: access-list 100 deny icmp any host 192.168.1.100",
+    "ACL: access-list 100 deny icmp 192.168.1.0 0.0.0.255 host 192.168.2.10",
+    "     access-list 100 permit ip any any",
+    "Il ping riesce solo se anche la risposta torna: servono le rotte in entrambi i versi.",
   ].join("\n");
 }
 
@@ -350,47 +358,44 @@ function setIp(
 function arpTable(ctx: CommandContext): string {
   const device = getDevice(ctx.state, ctx.deviceId);
   if (!device) return "Dispositivo non trovato.";
-  const cached = device.arpTable ?? [];
-  if (cached.length > 0) {
-    const lines = [
-      "",
-      "Interfaccia: Ethernet0 --- 0xffffffff",
-      "  Indirizzo Internet      Indirizzo fisico      Tipo",
-    ];
-    for (const e of cached) {
+  let next = ctx.state;
+  if ((device.arpTable ?? []).length === 0) {
+    // Prima consultazione: scopri i vicini della stessa subnet e popola la cache
+    const my = device.interfaces.find((i) => i.ip && i.mask && i.connectedLinkId);
+    if (!my?.ip || !my.mask) return "Nessuna voce ARP (configura prima un IP).";
+    const flood = l2Flood(ctx.state, ctx.deviceId, { sourceMac: my.mac, viaIfaceId: my.id });
+    next = flood.state;
+    for (const n of flood.hosts) {
+      if (n.device.id === ctx.deviceId || !n.iface.ip) continue;
+      if (!sameSubnet(my.ip, n.iface.ip, my.mask)) continue;
+      next = learnArp(next, ctx.deviceId, n.iface.ip, n.iface.mac, my.id);
+    }
+    ctx.setState(next);
+  }
+  const updated = getDevice(next, ctx.deviceId) ?? device;
+  const rows = updated.arpTable ?? [];
+  if (rows.length === 0) {
+    return "Nessuna voce ARP trovata. (collega i cavi / stessa VLAN, poi ping)";
+  }
+  const lines: string[] = [];
+  const byIface = new Map<string, typeof rows>();
+  for (const e of rows) {
+    const list = byIface.get(e.ifaceId) ?? [];
+    list.push(e);
+    byIface.set(e.ifaceId, list);
+  }
+  let n = 0;
+  for (const [ifaceId, entries] of byIface) {
+    n += 1;
+    const iface = updated.interfaces.find((i) => i.id === ifaceId);
+    lines.push("");
+    lines.push(`Interfaccia: ${iface?.ip ?? "?"} --- 0x${(n + 10).toString(16)}`);
+    lines.push("  Indirizzo Internet      Indirizzo fisico      Tipo");
+    for (const e of entries) {
       lines.push(
-        `  ${e.ip.padEnd(22)} ${e.mac.padEnd(20)} ${e.type === "static" ? "statico" : "dinamico"}`,
+        `  ${e.ip.padEnd(22)} ${e.mac.replace(/:/g, "-").padEnd(20)} ${e.type === "static" ? "statico" : "dinamico"}`,
       );
     }
-    return lines.join("\n");
-  }
-  // Prima consultazione: scopri i vicini L2 e popola la cache
-  const my = device.interfaces.find((i) => i.ip && i.mask);
-  if (!my?.ip || !my.mask) {
-    return "Nessuna voce ARP (configura prima un IP).";
-  }
-  const flood = l2Flood(ctx.state, ctx.deviceId, { sourceMac: my.mac });
-  let next = flood.state;
-  for (const n of flood.hosts) {
-    if (n.device.id === ctx.deviceId || !n.iface.ip) continue;
-    next = learnArp(next, ctx.deviceId, n.iface.ip, n.iface.mac, my.id);
-  }
-  ctx.setState(next);
-  const updated = getDevice(next, ctx.deviceId);
-  if (!updated) return "Dispositivo non trovato.";
-  const rows = updated.arpTable ?? [];
-  const lines = [
-    "",
-    "Interfaccia: Ethernet0 --- 0xffffffff",
-    "  Indirizzo Internet      Indirizzo fisico      Tipo",
-  ];
-  for (const e of rows) {
-    lines.push(
-      `  ${e.ip.padEnd(22)} ${e.mac.padEnd(20)} ${e.type === "static" ? "statico" : "dinamico"}`,
-    );
-  }
-  if (rows.length === 0) {
-    lines.push("  (vuota — collega i cavi / stessa VLAN, poi ping)");
   }
   return lines.join("\n");
 }
@@ -547,11 +552,14 @@ export function runLinuxCommand(
     if (!target) return { output: "Uso: curl <host|ip>" };
     const probe = fetchHttp(ctx.state, ctx.deviceId, target);
     const dest = probe.destIp ?? target;
-    const { result, state } = runPing(ctx.state, ctx.deviceId, dest);
+    const { result, state } = runPing(ctx.state, ctx.deviceId, dest, 1, {
+      proto: "tcp",
+      port: 80,
+    });
     ctx.setState(state);
     if (!result.ok) {
       return {
-        output: `curl: (7) Failed to connect to ${target}\n${result.message.split("\n")[0]}`,
+        output: `curl: (7) Failed to connect to ${target}\n${(result.reason ?? result.message.split("\n")[0])}`,
       };
     }
     const res = fetchHttp(state, ctx.deviceId, target, { reachable: true });
@@ -757,11 +765,14 @@ export function runPcCommand(
     if (!target) return { output: "Uso: http <host|ip>" };
     const probe = fetchHttp(ctx.state, ctx.deviceId, target);
     const dest = probe.destIp ?? target;
-    const { result, state } = runPing(ctx.state, ctx.deviceId, dest);
+    const { result, state } = runPing(ctx.state, ctx.deviceId, dest, 1, {
+      proto: "tcp",
+      port: 80,
+    });
     ctx.setState(state);
     if (!result.ok) {
       return {
-        output: `HTTP fallito: host non raggiungibile.\n${result.message.split("\n")[0]}`,
+        output: `HTTP fallito: host non raggiungibile.\n${(result.reason ?? result.message.split("\n")[0])}`,
       };
     }
     const res = fetchHttp(state, ctx.deviceId, target, { reachable: true });
@@ -1084,6 +1095,10 @@ function helpSwitch(): string {
     "  switchport trunk native vlan <id>",
     "  switchport trunk allowed vlan all|<lista>",
     "  no shutdown / shutdown",
+    "  spanning-tree vlan <id> priority <n> | root primary",
+    "  interface vlan <id> → ip address …     SVI",
+    "  ip default-gateway <ip>",
+    "  ip routing                  (solo multilayer: routing tra SVI)",
     "  exit / end",
     "  help",
     "",
@@ -1575,11 +1590,37 @@ export function runRouterCommand(
 
   if (
     (lower === "show spanning-tree" ||
-      lower === "show spanning-tree vlan 1" ||
+      lower.startsWith("show spanning-tree vlan ") ||
+      lower === "sh spanning-tree" ||
       lower === "show stp") &&
     (cli.mode === "enable" || cli.mode === "user")
   ) {
-    return { output: formatSpanningTree(device) };
+    if (!isManagedSwitch(device.type)) return { output: "% Spanning tree solo sugli switch" };
+    return { output: formatStp(ctx.state, device) };
+  }
+
+  if (lower.startsWith("spanning-tree vlan ") && cli.mode === "config") {
+    // spanning-tree vlan <id> priority <n> | root primary | root secondary
+    if (!isManagedSwitch(device.type)) return { output: "% Solo sugli switch" };
+    let priority: number | null = null;
+    if (parts[3]?.toLowerCase() === "priority") {
+      const n = Number(parts[4]);
+      if (!Number.isInteger(n) || n < 0 || n > 61440 || n % 4096 !== 0) {
+        return { output: "% Priorità: 0-61440 a passi di 4096" };
+      }
+      priority = n;
+    } else if (lower.endsWith("root primary")) {
+      priority = 24576;
+    } else if (lower.endsWith("root secondary")) {
+      priority = 28672;
+    }
+    if (priority === null) {
+      return { output: "% Uso: spanning-tree vlan <id> priority <n> | root primary | root secondary" };
+    }
+    ctx.setState(
+      recomputeStp(updateDevice(ctx.state, ctx.deviceId, { stpPriority: priority })),
+    );
+    return { output: "" };
   }
 
   if (
@@ -1655,31 +1696,26 @@ export function runRouterCommand(
   }
 
   if (lower.startsWith("access-list ") && cli.mode === "config") {
-    // access-list <n> permit|deny ip|icmp <src> <dst>
+    // access-list <n> permit|deny ...   (standard 1-99, estese 100-199)
     const id = Number(parts[1]);
     const action = parts[2]?.toLowerCase();
-    const protocol = (parts[3]?.toLowerCase() ?? "ip") as "ip" | "icmp" | "any";
-    let src = parts[4];
-    let dst = parts[5];
-    if (src?.toLowerCase() === "host" && parts[5]) {
-      src = `host ${parts[5]}`;
-      dst = parts[6]?.toLowerCase() === "host" && parts[7] ? `host ${parts[7]}` : parts[6];
-    } else if (dst?.toLowerCase() === "host" && parts[6]) {
-      dst = `host ${parts[6]}`;
-    }
+    if (action === "remark") return { output: "" };
     if (
       !Number.isInteger(id) ||
-      id < 1 ||
-      id > 199 ||
-      (action !== "permit" && action !== "deny") ||
-      !src ||
-      !dst
+      (!isStandardAcl(id) && !isExtendedAcl(id)) ||
+      (action !== "permit" && action !== "deny")
     ) {
       return {
-        output:
-          "% Uso: access-list <1-199> permit|deny ip|icmp <src|any|host X> <dst|any|host Y>",
+        output: [
+          "% Uso:",
+          "  access-list <1-99> permit|deny <origine>",
+          "  access-list <100-199> permit|deny ip|icmp|tcp|udp <origine> <destinazione> [eq porta]",
+          "  <origine>/<destinazione> = any | host A.B.C.D | A.B.C.D <wildcard>",
+        ].join("\n"),
       };
     }
+    const parsed = parseAceTokens(id, parts.slice(3));
+    if (!parsed.ace) return { output: parsed.error ?? "% Invalid input" };
     const lists = [...(device.accessLists ?? [])];
     const existing = lists.find((l) => l.id === id);
     const prevAces = existing?.aces ?? [];
@@ -1691,22 +1727,59 @@ export function runRouterCommand(
       id,
       aces: [
         ...prevAces,
-        {
-          sequence: seq,
-          action: action as "permit" | "deny",
-          protocol:
-            protocol === "icmp" || protocol === "ip" || protocol === "any"
-              ? protocol
-              : "ip",
-          source: src.toLowerCase() === "any" ? "any" : src,
-          destination: dst.toLowerCase() === "any" ? "any" : dst,
-        },
+        { sequence: seq, action: action as "permit" | "deny", ...parsed.ace },
       ],
     };
     const nextLists = existing
       ? lists.map((l) => (l.id === id ? nextList : l))
       : [...lists, nextList];
     ctx.setState(updateDevice(ctx.state, ctx.deviceId, { accessLists: nextLists }));
+    return { output: "" };
+  }
+
+  if (lower.startsWith("no access-list ") && cli.mode === "config") {
+    const id = Number(parts[2]);
+    if (!Number.isInteger(id)) return { output: "% Uso: no access-list <n>" };
+    ctx.setState(
+      updateDevice(ctx.state, ctx.deviceId, {
+        accessLists: (device.accessLists ?? []).filter((l) => l.id !== id),
+      }),
+    );
+    return { output: "" };
+  }
+
+  if (
+    (lower === "ip routing" || lower === "no ip routing") &&
+    cli.mode === "config"
+  ) {
+    const on = lower === "ip routing";
+    if (!isManagedSwitch(device.type)) {
+      // Sui router il routing è sempre attivo
+      return { output: on ? "" : "% Su questo router il routing resta attivo" };
+    }
+    if (!isL3Device(device.type)) {
+      return { output: "% Questo switch è solo L2: usa uno switch multilayer (3560/3650)" };
+    }
+    ctx.setState(updateDevice(ctx.state, ctx.deviceId, { ipRouting: on }));
+    return { output: "" };
+  }
+
+  if (
+    (lower.startsWith("ip helper-address ") || lower === "no ip helper-address") &&
+    cli.mode === "config-if" &&
+    cli.ifaceId
+  ) {
+    if (lower.startsWith("no ")) {
+      ctx.setState(
+        updateIface(ctx.state, ctx.deviceId, cli.ifaceId, { helperAddress: null }),
+      );
+      return { output: "" };
+    }
+    const ip = parts[2];
+    if (!ip || !isValidIp(ip)) return { output: "% Invalid IP address" };
+    ctx.setState(
+      updateIface(ctx.state, ctx.deviceId, cli.ifaceId, { helperAddress: ip }),
+    );
     return { output: "" };
   }
 
@@ -1748,11 +1821,12 @@ export function runRouterCommand(
     const lists = device.accessLists ?? [];
     if (lists.length === 0) return { output: "" };
     const blocks = lists.map((l) => {
-      const lines = l.aces.map(
-        (a) =>
-          `  ${a.sequence} ${a.action} ${a.protocol} ${a.source} ${a.destination}`,
-      );
-      return [`Extended IP access list ${l.id}`, ...lines].join("\n");
+      const standard = isStandardAcl(l.id);
+      const lines = l.aces.map((a) => `    ${formatAce(a, standard)}`);
+      return [
+        `${standard ? "Standard" : "Extended"} IP access list ${l.id}`,
+        ...lines,
+      ].join("\n");
     });
     return { output: blocks.join("\n") };
   }
@@ -1892,7 +1966,7 @@ export function runRouterCommand(
 
   if (
     lower.startsWith("ip route ") &&
-    (cli.mode === "config" || cli.mode === "enable")
+    cli.mode === "config"
   ) {
     const network = parts[2];
     const mask = parts[3];
@@ -1918,7 +1992,7 @@ export function runRouterCommand(
 
   if (
     lower.startsWith("no ip route ") &&
-    (cli.mode === "config" || cli.mode === "enable")
+    cli.mode === "config"
   ) {
     const network = parts[3];
     const mask = parts[4];
@@ -1956,7 +2030,7 @@ export function runRouterCommand(
         `Sending 5, 100-byte ICMP Echos to ${target}, timeout is 2 seconds:`,
         `.....`,
         `Success rate is 0 percent (0/5)`,
-        result.message.split("\n")[0],
+        (result.reason ?? result.message.split("\n")[0]),
       ].join("\n"),
     };
   }

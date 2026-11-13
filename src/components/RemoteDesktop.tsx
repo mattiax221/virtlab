@@ -94,7 +94,7 @@ export function RemoteDesktop({
       if (!result.ok) {
         setPhase("error");
         setStatus(
-          `Non raggiungibile: ${result.message.split("\n")[0]}. Controlla cavi, VLAN e IP.`,
+          `Non raggiungibile: ${(result.reason ?? result.message.split("\n")[0])}. Controlla cavi, VLAN e IP.`,
         );
         return;
       }

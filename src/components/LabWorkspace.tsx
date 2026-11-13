@@ -142,6 +142,22 @@ function modeFor(device: Device): OpenMode {
   return "panel";
 }
 
+const RUNTIME_KEYS = new Set([
+  "arpTable",
+  "macTable",
+  "stpState",
+  "stpRole",
+  "entries",
+  "clockIso",
+]);
+
+/** Configurazione del lab senza le tabelle apprese a runtime. */
+function configFingerprint(state: LabState): string {
+  return JSON.stringify(state, (key, value) =>
+    RUNTIME_KEYS.has(key) ? undefined : value,
+  );
+}
+
 export function LabWorkspace() {
   const [state, setState] = useState<LabState>(() => createEmptyLab());
   const stateRef = useRef(state);
@@ -231,8 +247,23 @@ export function LabWorkspace() {
       if (param) {
         const decoded = await decodeLabFromHash(param);
         if (decoded.state) {
-          setState(decoded.state);
-          showToast("Lab aperto dal link (snapshot)");
+          // Il lab del link sostituirebbe l’autosave: chiedi prima di perderlo
+          const keepMine =
+            hasAutosaveLab() &&
+            !window.confirm(
+              "Questo link apre un lab condiviso.\n" +
+                "Il lab che avevi salvato in automatico verrà sostituito.\n\n" +
+                "OK = apri il lab del link\nAnnulla = tieni il tuo lab",
+            );
+          if (keepMine) {
+            const saved = loadAutosave();
+            if (saved) setState(saved);
+            window.history.replaceState(null, "", window.location.pathname);
+            showToast("Tenuto il tuo lab: link condiviso ignorato");
+          } else {
+            setState(decoded.state);
+            showToast("Lab aperto dal link (snapshot)");
+          }
         } else if (decoded.error) {
           showToast(decoded.error);
         }
@@ -266,6 +297,24 @@ export function LabWorkspace() {
   const applyState = useCallback(
     (next: LabState | ((prev: LabState) => LabState)) => {
       pushHistory();
+      setState(next);
+    },
+    [pushHistory],
+  );
+
+  /**
+   * Aggiornamenti dai pannelli (console, desktop, Wi‑Fi…): entrano nella
+   * cronologia di Annulla se cambiano la configurazione; le sole tabelle
+   * apprese (ARP, MAC, STP, log) no, così un ping non diventa un passo.
+   */
+  const panelSetState = useCallback(
+    (next: LabState) => {
+      const prev = stateRef.current;
+      if (next === prev) return;
+      if (configFingerprint(next) !== configFingerprint(prev)) {
+        pushHistory();
+      }
+      stateRef.current = next;
       setState(next);
     },
     [pushHistory],
@@ -534,6 +583,8 @@ export function LabWorkspace() {
     setDrag((d) =>
       d ? { ...d, x: rawX, y: rawY, moved } : d,
     );
+    // Primo spostamento reale: salva la posizione di partenza per Annulla
+    if (moved && !drag.moved) pushHistory();
     const prev = dragSnapRef.current;
     if (!moved || (prev && prev.x === sx && prev.y === sy)) return;
     dragSnapRef.current = { x: sx, y: sy };
@@ -1536,7 +1587,7 @@ export function LabWorkspace() {
         <WindowsDesktop
           device={openDevice}
           stateRef={stateRef}
-          setState={setState}
+          setState={panelSetState}
           onClose={closeOpen}
           onSimulate={(packets, message) => {
             if (packets.length) setSimPackets(packets);
@@ -1548,7 +1599,7 @@ export function LabWorkspace() {
         <RouterConsole
           device={openDevice}
           stateRef={stateRef}
-          setState={setState}
+          setState={panelSetState}
           onClose={closeOpen}
         />
       )}
@@ -1556,7 +1607,7 @@ export function LabWorkspace() {
         <SwitchPanel
           device={openDevice}
           stateRef={stateRef}
-          setState={setState}
+          setState={panelSetState}
           onClose={closeOpen}
         />
       )}
@@ -1566,7 +1617,7 @@ export function LabWorkspace() {
           device={openDevice}
           state={state}
           stateRef={stateRef}
-          setState={setState}
+          setState={panelSetState}
           onClose={closeOpen}
         />
       )}
@@ -1576,7 +1627,7 @@ export function LabWorkspace() {
           device={openDevice}
           state={state}
           stateRef={stateRef}
-          setState={setState}
+          setState={panelSetState}
           onClose={closeOpen}
         />
       )}
@@ -1586,7 +1637,7 @@ export function LabWorkspace() {
           device={openDevice}
           state={state}
           stateRef={stateRef}
-          setState={setState}
+          setState={panelSetState}
           onClose={closeOpen}
         />
       )}
@@ -1594,7 +1645,7 @@ export function LabWorkspace() {
         <PrinterPanel
           device={openDevice}
           stateRef={stateRef}
-          setState={setState}
+          setState={panelSetState}
           onClose={closeOpen}
         />
       )}

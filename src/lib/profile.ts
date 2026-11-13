@@ -22,7 +22,16 @@ export function isRecentlySeen(iso: string | null, now = Date.now()): boolean {
 }
 
 export function safeNextPath(next: string | undefined): string {
-  if (!next || !next.startsWith("/") || next.startsWith("//")) return "/lab";
+  // Solo percorsi interni: niente "//host", "/\host" (i browser trattano "\"
+  // come "/") né caratteri di controllo che il parser URL scarta.
+  if (
+    !next ||
+    !next.startsWith("/") ||
+    next.startsWith("//") ||
+    /[\\\u0000-\u001f\u007f]/.test(next)
+  ) {
+    return "/lab";
+  }
   return next;
 }
 

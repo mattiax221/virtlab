@@ -1,9 +1,7 @@
-import { routerAllowsIcmp } from "./acl";
-import { learnArp } from "./arp";
 import { inferCable, type CableKind } from "./catalog";
 import { getDevice, getIface } from "./engine-helpers";
 import { hostFirewallBlocks } from "./hostFirewall";
-import { formatIp, isValidIp, parseIp, parseMask, randomMac, sameSubnet } from "./ip";
+import { formatIp, isValidIp, parseIp, parseMask, randomMac } from "./ip";
 import { l2Flood } from "./l2";
 import {
   availableModulesFor,
@@ -15,6 +13,7 @@ import {
   type ModuleKind,
 } from "./modules";
 import { defaultServerServices, requestDhcp, resolveDnsName } from "./services";
+import { canRoute, pickSourceIface, roundTrip } from "./routing";
 import { recomputeStp } from "./stp";
 import { isWifiAp, wifiSecurityLabel, wifiSecurityNeedsKey } from "./wifi";
 import { appendSyslog } from "./telemetry";
@@ -33,7 +32,6 @@ import {
   type Link,
   type PingHop,
   type PingResult,
-  type StaticRoute,
 } from "./types";
 
 export { getDevice, getIface };
@@ -43,6 +41,27 @@ let idCounter = 0;
 export function uid(prefix: string): string {
   idCounter += 1;
   return `${prefix}-${idCounter}`;
+}
+
+/**
+ * Porta il contatore degli id oltre il numero più alto già presente nel lab.
+ * Va chiamata ogni volta che un lab arriva da fuori (autosave, file, link),
+ * altrimenti i nuovi dispositivi riprendono id già usati (pc-1, if-4…).
+ */
+export function reserveIdsFrom(state: LabState): void {
+  let max = idCounter;
+  const bump = (id: string | null | undefined) => {
+    if (!id) return;
+    const m = /-(\d+)$/.exec(id);
+    if (m) max = Math.max(max, Number(m[1]));
+  };
+  for (const d of state.devices) {
+    bump(d.id);
+    for (const m of d.modules ?? []) bump(m.id);
+    for (const i of d.interfaces) bump(i.id);
+  }
+  for (const l of state.links) bump(l.id);
+  idCounter = max;
 }
 
 export function createDevice(
@@ -117,6 +136,12 @@ export function createDevice(
   if (isL3Device(type) || type.startsWith("firewall")) {
     device.accessLists = [];
   }
+  if (type === "router" || type.startsWith("router_")) {
+    // Come su IOS: le interfacce dei router partono in shutdown
+    for (const i of device.interfaces) {
+      if (!i.parentIfaceId) i.enabled = false;
+    }
+  }
   return device;
 }
 
@@ -155,7 +180,7 @@ export function setDevicePower(
       powered ? "%SYS-5-RESTART: System restarted" : "%SYS-5-POWEROFF: Power off",
     );
   }
-  return next;
+  return recomputeStp(next);
 }
 
 export function installModule(
@@ -405,6 +430,8 @@ export function createDemoLab(): LabState {
   if (server.services?.dhcp?.pools?.[0]) {
     server.services.dhcp.pools[0].dns = "192.168.1.100";
   }
+  rtr.interfaces[0].enabled = true;
+  rtr.interfaces[1].enabled = true;
   rtr.interfaces[0].ip = "192.168.1.1";
   rtr.interfaces[0].mask = "255.255.255.0";
   rtr.interfaces[1].ip = "10.0.0.2";
@@ -438,15 +465,18 @@ export function createDemoLab(): LabState {
     links.push(link);
   }
 
-  return {
+  let lab: LabState = recomputeStp({
     devices: [pc1, pc2, server, printer, sw, rtr, modem, cloud],
     links,
-  };
+  });
+  // PC1 è in DHCP: prende subito l’indirizzo dal Server0
+  lab = requestDhcp(lab, pc2.id).state;
+  return lab;
 }
 
 export function getFreeIface(device: Device): InterfaceConfig | undefined {
   return device.interfaces.find(
-    (i) => !i.connectedLinkId && !i.parentIfaceId && i.enabled,
+    (i) => !i.connectedLinkId && !i.parentIfaceId && !i.sviVlan,
   );
 }
 
@@ -480,9 +510,10 @@ function ifaceLinkCompatible(
   return null;
 }
 
+/** Porte fisiche senza cavo (anche in shutdown: il cavo si può collegare). */
 export function freePhysicalPorts(device: Device): InterfaceConfig[] {
   return device.interfaces.filter(
-    (i) => !i.connectedLinkId && !i.parentIfaceId && i.enabled,
+    (i) => !i.connectedLinkId && !i.parentIfaceId && !i.sviVlan,
   );
 }
 
@@ -515,12 +546,12 @@ export function connectDevices(
       : undefined) ?? bFree[0];
 
   if (opts?.aIfaceId) {
-    if (!aIf || aIf.connectedLinkId || aIf.parentIfaceId || !aIf.enabled) {
+    if (!aIf || aIf.connectedLinkId || aIf.parentIfaceId || aIf.sviVlan) {
       return { state, error: "Porta sorgente non disponibile." };
     }
   }
   if (opts?.bIfaceId) {
-    if (!bIf || bIf.connectedLinkId || bIf.parentIfaceId || !bIf.enabled) {
+    if (!bIf || bIf.connectedLinkId || bIf.parentIfaceId || bIf.sviVlan) {
       return { state, error: "Porta destinazione non disponibile." };
     }
   }
@@ -718,10 +749,11 @@ export function updateIface(
       | "clockRate"
       | "aclIn"
       | "aclOut"
+      | "helperAddress"
     >
   >,
 ): LabState {
-  return {
+  const next: LabState = {
     ...state,
     devices: state.devices.map((d) => {
       if (d.id !== deviceId) return d;
@@ -733,6 +765,8 @@ export function updateIface(
       };
     }),
   };
+  // shutdown / no shutdown cambia la topologia attiva: ricalcola lo STP
+  return "enabled" in patch ? recomputeStp(next) : next;
 }
 
 export function updateDevice(
@@ -750,6 +784,8 @@ export function updateDevice(
       | "printerService"
       | "arpTable"
       | "routes"
+      | "ipRouting"
+      | "stpPriority"
     >
   >,
 ): LabState {
@@ -775,154 +811,31 @@ export function moveDevice(
   };
 }
 
-type Endpoint = { device: Device; iface: InterfaceConfig };
-
-/** Choose the NIC that should originate traffic toward targetIp. */
-function pickSourceIface(
-  device: Device,
-  targetIp: string,
-): InterfaceConfig | null {
-  const withIp = device.interfaces.filter(
-    (i) => i.ip && i.mask && i.enabled && !i.parentIfaceId,
-  );
-  // 1) Connected iface whose subnet contains the target
-  const connectedInSubnet = withIp.find(
-    (i) =>
-      i.connectedLinkId &&
-      i.ip &&
-      i.mask &&
-      sameSubnet(i.ip, targetIp, i.mask),
-  );
-  if (connectedInSubnet) return connectedInSubnet;
-  // 2) Any connected iface with IP (ethernet preferred)
-  const connectedEth = withIp.find(
-    (i) => i.connectedLinkId && (i.media === "ethernet" || i.media === "fiber"),
-  );
-  if (connectedEth) return connectedEth;
-  const connectedAny = withIp.find((i) => i.connectedLinkId);
-  if (connectedAny) return connectedAny;
-  // 3) Subnet match even if unplugged (so we can give a clear error)
-  const subnetMatch = withIp.find(
-    (i) => i.ip && i.mask && sameSubnet(i.ip, targetIp, i.mask),
-  );
-  if (subnetMatch) return subnetMatch;
-  return withIp[0] ?? null;
-}
-
-function findLocalRoute(device: Device, destIp: string): InterfaceConfig | null {
-  for (const iface of device.interfaces) {
-    if (!iface.ip || !iface.mask || !iface.enabled) continue;
-    if (sameSubnet(iface.ip, destIp, iface.mask)) return iface;
-  }
-  return device.interfaces.find((i) => i.ip && i.mask && i.gateway && i.enabled) ?? null;
-}
-
-/**
- * Discover L2 hosts reachable from each router interface / subinterface
- * (router-on-a-stick: subiface uses parent trunk + vlanTag).
- */
-function collectRouterDomains(
-  state: LabState,
-  router: Device,
-): { hosts: Endpoint[]; state: LabState } {
-  let next = state;
-  const found: Endpoint[] = [];
-  const seen = new Set<string>();
-
-  for (const iface of router.interfaces) {
-    if (!iface.enabled || !iface.ip || !iface.mask) continue;
-
-    let peerDeviceId: string | null = null;
-    let vlanHint: number | undefined;
-
-    if (iface.parentIfaceId && iface.vlanTag != null) {
-      const parent = getIface(router, iface.parentIfaceId);
-      if (!parent?.connectedLinkId) continue;
-      const link = next.links.find((l) => l.id === parent.connectedLinkId);
-      if (!link || link.media === "console") continue;
-      peerDeviceId =
-        link.aDeviceId === router.id ? link.bDeviceId : link.aDeviceId;
-      vlanHint = iface.vlanTag;
-    } else if (iface.connectedLinkId) {
-      const link = next.links.find((l) => l.id === iface.connectedLinkId);
-      if (!link || link.media === "console") continue;
-      // Serial WAN requires clock rate on at least one side (DCE)
-      if (link.media === "serial" || iface.media === "serial") {
-        const peer =
-          link.aDeviceId === router.id
-            ? getDevice(next, link.bDeviceId)
-            : getDevice(next, link.aDeviceId);
-        const peerIf = peer?.interfaces.find(
-          (i) =>
-            i.id ===
-            (link.aDeviceId === router.id ? link.bIfaceId : link.aIfaceId),
-        );
-        const hasClock =
-          (iface.clockRate != null && iface.clockRate > 0) ||
-          (peerIf?.clockRate != null && peerIf.clockRate > 0);
-        if (!hasClock) continue; // line protocol down
-      }
-      peerDeviceId =
-        link.aDeviceId === router.id ? link.bDeviceId : link.aDeviceId;
-    } else {
-      continue;
-    }
-
-    const flood = l2Flood(next, peerDeviceId, {
-      sourceMac: iface.mac,
-      vlanHint,
-    });
-    next = flood.state;
-    for (const h of flood.hosts) {
-      // Only hosts on this connected subnet
-      if (!h.iface.ip || !sameSubnet(iface.ip, h.iface.ip, iface.mask)) continue;
-      if (!seen.has(h.iface.id)) {
-        seen.add(h.iface.id);
-        found.push(h);
-      }
-    }
-  }
-  for (const iface of router.interfaces) {
-    if (iface.ip && iface.enabled) found.push({ device: router, iface });
-  }
-  return { hosts: found, state: next };
-}
-
 export function runPing(
   state: LabState,
   fromDeviceId: string,
   targetIp: string,
   count = 4,
+  /** Per HTTP/FTP…: verifica la raggiungibilità con quel protocollo (ACL) */
+  probe?: { proto: "tcp" | "udp"; port: number },
 ): { result: PingResult; state: LabState } {
+  const proto = probe?.proto ?? "icmp";
   const from = getDevice(state, fromDeviceId);
   if (!from) {
     return {
       state,
-      result: {
-        ok: false,
-        fromIp: "",
-        toIp: targetIp,
-        hops: [],
-        rttMs: 0,
-        message: "Dispositivo sorgente non trovato.",
-        packets: { sent: 0, received: 0, lost: 0 },
-      },
+      result: failPing("", targetIp, count, [], "Dispositivo sorgente non trovato."),
     };
   }
   if (!from.powered) {
     return {
       state,
-      result: failPing(
-        "",
-        targetIp,
-        count,
-        [],
-        `${from.name} è spento (Physical → Accendi).`,
-      ),
+      result: failPing("", targetIp, count, [], `${from.name} è spento (Physical → Accendi).`),
     };
   }
 
   // DNS name → IP
+  let label = targetIp;
   if (!isValidIp(targetIp)) {
     const resolved = resolveDnsName(state, fromDeviceId, targetIp);
     if (!resolved) {
@@ -933,18 +846,15 @@ export function runPing(
           targetIp,
           count,
           [],
-          `Impossibile risolvere nome host: ${targetIp}`,
+          `La richiesta Ping non ha trovato l'host ${targetIp}. Verificare il nome e riprovare.`,
         ),
       };
     }
+    label = `${targetIp} [${resolved}]`;
     targetIp = resolved;
   }
 
-  // Prefer a connected iface that can reach the target subnet
-  const srcIface =
-    pickSourceIface(from, targetIp) ??
-    from.interfaces.find((i) => i.ip && i.enabled) ??
-    from.interfaces[0];
+  const srcIface = pickSourceIface(state, from, targetIp);
   const fromIp = srcIface?.ip ?? "";
 
   if (!srcIface?.ip || !srcIface.mask) {
@@ -955,11 +865,14 @@ export function runPing(
         targetIp,
         count,
         [],
-        "Richiesta scaduta.\n\nNessun IP. Configura Ethernet (non Wi‑Fi) con ipconfig /ip oppure Connessioni di rete.",
+        canRoute(from)
+          ? `Nessuna rotta verso ${targetIp} su ${from.name}.`
+          : "Nessun IP. Configura Ethernet (non Wi‑Fi) con ipconfig /ip oppure Connessioni di rete.",
+        label,
       ),
     };
   }
-  if (!srcIface.connectedLinkId) {
+  if (!srcIface.parentIfaceId && !srcIface.sviVlan && !srcIface.connectedLinkId) {
     return {
       state,
       result: failPing(
@@ -967,307 +880,77 @@ export function runPing(
         targetIp,
         count,
         [],
-        `Richiesta scaduta.\n\nL'IP ${fromIp} è su ${srcIface.name} ma quella porta non ha un cavo.\nCollega Ethernet allo switch (non la porta Wi‑Fi) e riprova.`,
+        `L'IP ${fromIp} è su ${srcIface.name} ma quella porta non ha un cavo. Collega Ethernet allo switch (non la porta Wi‑Fi) e riprova.`,
+        label,
       ),
     };
   }
 
-  const blockedOut = hostFirewallBlocks(from, "out", "icmp", targetIp);
+  const blockedOut = hostFirewallBlocks(from, "out", proto, targetIp, probe?.port);
   if (blockedOut) {
+    return { state, result: failPing(fromIp, targetIp, count, [], blockedOut, label) };
+  }
+
+  const firstHop: PingHop = { deviceId: from.id, deviceName: from.name, ip: fromIp };
+
+  if (from.interfaces.some((i) => i.ip === targetIp && i.enabled)) {
     return {
       state,
-      result: failPing(fromIp, targetIp, count, [], blockedOut),
+      result: okPing(fromIp, targetIp, label, count, [firstHop], 1, ttlBase(from), []),
     };
   }
 
-  if (srcIface.ip === targetIp) {
+  const rt = roundTrip(state, from, srcIface, targetIp, proto, probe?.port);
+  const hops = [firstHop, ...rt.hops];
+  if (!rt.ok) {
     return {
-      state,
-      result: {
-        ok: true,
+      state: rt.state,
+      result: failPing(
         fromIp,
-        toIp: targetIp,
-        hops: [{ deviceId: from.id, deviceName: from.name, ip: fromIp }],
-        rttMs: 1,
-        message: buildPingOk(targetIp, count, 1),
-        packets: { sent: count, received: count, lost: 0 },
-      },
-    };
-  }
-
-  const hops: PingHop[] = [
-    { deviceId: from.id, deviceName: from.name, ip: fromIp },
-  ];
-
-  // VLAN-aware L2 flood + MAC learning; unicast se ARP già conosciuto
-  const knownMac = from.arpTable?.find((e) => e.ip === targetIp)?.mac;
-  const flood = l2Flood(state, from.id, {
-    sourceMac: srcIface.mac,
-    destMac: knownMac,
-  });
-  let nextState = flood.state;
-
-  if (sameSubnet(srcIface.ip, targetIp, srcIface.mask)) {
-    // Serial same-subnet: need clock on DCE
-    if (srcIface.media === "serial") {
-      const link = nextState.links.find((l) => l.id === srcIface.connectedLinkId);
-      if (link) {
-        const peerId =
-          link.aDeviceId === from.id ? link.bDeviceId : link.aDeviceId;
-        const peerIfId =
-          link.aDeviceId === from.id ? link.bIfaceId : link.aIfaceId;
-        const peer = getDevice(nextState, peerId);
-        const peerIf = peer?.interfaces.find((i) => i.id === peerIfId);
-        const hasClock =
-          (srcIface.clockRate != null && srcIface.clockRate > 0) ||
-          (peerIf?.clockRate != null && peerIf.clockRate > 0);
-        if (!hasClock) {
-          return {
-            state: nextState,
-            result: failPing(
-              fromIp,
-              targetIp,
-              count,
-              hops,
-              "Serial: line protocol down (manca clock rate sul DCE).",
-            ),
-          };
-        }
-      }
-    }
-    const target = flood.hosts.find((e) => e.iface.ip === targetIp);
-    if (!target) {
-      return {
-        state: nextState,
-        result: failPing(
-          fromIp,
-          targetIp,
-          count,
-          hops,
-          "Host non raggiungibile in questa VLAN (L2).",
-        ),
-      };
-    }
-    // Learn destination MAC on return path
-    const back = l2Flood(nextState, target.device.id, {
-      sourceMac: target.iface.mac,
-    });
-    nextState = back.state;
-    nextState = learnArp(
-      nextState,
-      from.id,
-      targetIp,
-      target.iface.mac,
-      srcIface.id,
-    );
-    nextState = learnArp(
-      nextState,
-      target.device.id,
-      fromIp,
-      srcIface.mac,
-      target.iface.id,
-    );
-    hops.push({
-      deviceId: target.device.id,
-      deviceName: target.device.name,
-      ip: targetIp,
-    });
-    const blockedIn = hostFirewallBlocks(
-      target.device,
-      "in",
-      "icmp",
-      fromIp,
-    );
-    if (blockedIn) {
-      return {
-        state: nextState,
-        result: failPing(fromIp, targetIp, count, hops, blockedIn),
-      };
-    }
-    const rtt = 2 + Math.floor(Math.random() * 4);
-    return {
-      state: nextState,
-      result: {
-        ok: true,
-        fromIp,
-        toIp: targetIp,
+        targetIp,
+        count,
         hops,
-        rttMs: rtt,
-        message: buildPingOk(targetIp, count, rtt),
-        packets: { sent: count, received: count, lost: 0 },
-      },
+        rt.message ?? "Richiesta scaduta.",
+        label,
+        rt.rejectedBy?.ip,
+      ),
     };
   }
-
-  if (!srcIface.gateway) {
-    return {
-      state: nextState,
-      result: failPing(fromIp, targetIp, count, hops, "Fuori rete: serve un gateway."),
-    };
-  }
-  if (!sameSubnet(srcIface.ip, srcIface.gateway, srcIface.mask)) {
-    return {
-      state: nextState,
-      result: failPing(fromIp, targetIp, count, hops, "Gateway non in subnet."),
-    };
-  }
-
-  const gw = flood.hosts.find((e) => e.iface.ip === srcIface.gateway);
-  if (!gw) {
-    return {
-      state: nextState,
-      result: failPing(fromIp, targetIp, count, hops, "Gateway non raggiungibile."),
-    };
-  }
-
-  hops.push({
-    deviceId: gw.device.id,
-    deviceName: gw.device.name,
-    ip: srcIface.gateway,
-  });
-  nextState = learnArp(
-    nextState,
-    from.id,
-    srcIface.gateway,
-    gw.iface.mac,
-    srcIface.id,
-  );
-
-  if (isL3Device(gw.device.type)) {
-    const ingress =
-      gw.iface ??
-      findLocalRoute(gw.device, fromIp) ??
-      gw.device.interfaces.find((i) => i.ip === srcIface.gateway) ??
-      null;
-    void findLocalRoute;
-    let current = gw.device;
-    const routed = collectRouterDomains(nextState, current);
-    nextState = routed.state;
-    let found = routed.hosts.find((e) => e.iface.ip === targetIp) ?? null;
-
-    // Routing statico: ip route tra router (fino a 4 hop)
-    for (let i = 0; !found && i < 4; i++) {
-      const route = matchStaticRoute(current, targetIp);
-      if (!route) break;
-      const floodR = l2Flood(nextState, current.id, {
-        sourceMac: current.interfaces.find((x) => x.ip)?.mac,
-      });
-      nextState = floodR.state;
-      const nextHop = floodR.hosts.find((e) => e.iface.ip === route.nextHop);
-      if (!nextHop || !isL3Device(nextHop.device.type)) break;
-      nextState = learnArp(
-        nextState,
-        current.id,
-        route.nextHop,
-        nextHop.iface.mac,
-        current.interfaces.find((x) => x.ip)?.id ?? nextHop.iface.id,
-      );
-      hops.push({
-        deviceId: nextHop.device.id,
-        deviceName: nextHop.device.name,
-        ip: route.nextHop,
-      });
-      current = nextHop.device;
-      const more = collectRouterDomains(nextState, current);
-      nextState = more.state;
-      found = more.hosts.find((e) => e.iface.ip === targetIp) ?? null;
-    }
-
-    if (!found) {
-      return {
-        state: nextState,
-        result: failPing(fromIp, targetIp, count, hops, "Nessuna rotta."),
-      };
-    }
-    const egress =
-      findLocalRoute(current, targetIp) ??
-      current.interfaces.find(
-        (i) =>
-          i.ip &&
-          i.mask &&
-          found!.iface.ip &&
-          sameSubnet(i.ip, found!.iface.ip, i.mask),
-      ) ??
-      null;
-    const acl = routerAllowsIcmp(
-      current,
-      ingress,
-      egress,
-      fromIp,
-      targetIp,
-    );
-    if (!acl.ok) {
-      return {
-        state: nextState,
-        result: failPing(
-          fromIp,
-          targetIp,
-          count,
-          hops,
-          acl.reason ?? "Negato da ACL.",
-        ),
-      };
-    }
-    nextState = learnArp(
-      nextState,
-      current.id,
-      targetIp,
-      found.iface.mac,
-      egress?.id ?? found.iface.id,
-    );
-    hops.push({
-      deviceId: found.device.id,
-      deviceName: found.device.name,
-      ip: targetIp,
-    });
-    const blockedInL3 = hostFirewallBlocks(found.device, "in", "icmp", fromIp);
-    if (blockedInL3) {
-      return {
-        state: nextState,
-        result: failPing(fromIp, targetIp, count, hops, blockedInL3),
-      };
-    }
-    const rtt = 8 + Math.floor(Math.random() * 12);
-    return {
-      state: nextState,
-      result: {
-        ok: true,
-        fromIp,
-        toIp: targetIp,
-        hops,
-        rttMs: rtt,
-        message: buildPingOk(targetIp, count, rtt),
-        packets: { sent: count, received: count, lost: 0 },
-      },
-    };
-  }
-
+  const routers = rt.hops.filter((h) => h.ip !== targetIp).length;
+  const rtt = routers === 0 ? 1 + Math.floor(Math.random() * 3) : 2 + routers * 4;
+  const ttl = ttlBase(rt.target?.device ?? from) - routers;
   return {
-    state: nextState,
-    result: failPing(fromIp, targetIp, count, hops, "Richiesta scaduta."),
+    state: rt.state,
+    result: okPing(fromIp, targetIp, label, count, hops, rtt, ttl, rt.warnings),
   };
 }
 
-function matchStaticRoute(
-  router: Device,
-  destIp: string,
-): StaticRoute | null {
-  const dest = parseIp(destIp);
-  if (dest === null) return null;
-  let best: StaticRoute | null = null;
-  let bestPrefix = -1;
-  for (const r of router.routes ?? []) {
-    const net = parseIp(r.network);
-    const mask = parseMask(r.mask);
-    if (net === null || mask === null) continue;
-    if ((dest & mask) >>> 0 !== (net & mask) >>> 0) continue;
-    const prefix = mask.toString(2).split("1").length - 1;
-    if (prefix > bestPrefix) {
-      bestPrefix = prefix;
-      best = r;
-    }
-  }
-  return best;
+/** TTL iniziale tipico del sistema che risponde. */
+function ttlBase(device: Device): number {
+  if (isL3Device(device.type) || isManagedSwitch(device.type)) return 255;
+  if (device.hostOs === "linux") return 64;
+  return 128;
+}
+
+function okPing(
+  fromIp: string,
+  toIp: string,
+  label: string,
+  count: number,
+  hops: PingHop[],
+  rtt: number,
+  ttl: number,
+  warnings: string[],
+): PingResult {
+  return {
+    ok: true,
+    fromIp,
+    toIp,
+    hops,
+    rttMs: rtt,
+    message: buildPingOk(toIp, label, count, rtt, ttl, warnings),
+    packets: { sent: count, received: count, lost: 0 },
+  };
 }
 
 function failPing(
@@ -1275,33 +958,69 @@ function failPing(
   toIp: string,
   count: number,
   hops: PingHop[],
-  message: string,
+  reason: string,
+  label?: string,
+  rejectedByIp?: string,
 ): PingResult {
+  const lines = [""];
+  if (label) {
+    lines.push(`Esecuzione di Ping ${label} con 32 byte di dati:`);
+    for (let i = 0; i < count; i++) {
+      lines.push(
+        rejectedByIp
+          ? `Risposta da ${rejectedByIp}: Host di destinazione non raggiungibile.`
+          : "Richiesta scaduta.",
+      );
+    }
+    lines.push("");
+    lines.push(`Statistiche Ping per ${toIp}:`);
+    const received = rejectedByIp ? count : 0;
+    lines.push(
+      `    Pacchetti: Trasmessi = ${count}, Ricevuti = ${received}, Persi = ${count - received} (${Math.round(((count - received) / count) * 100)}% persi),`,
+    );
+    lines.push("");
+    lines.push(`Motivo (NetLab): ${reason}`);
+  } else {
+    lines.push(reason);
+  }
   return {
     ok: false,
     fromIp,
     toIp,
     hops,
     rttMs: 0,
-    message,
+    message: lines.join("\n"),
+    reason,
     packets: { sent: count, received: 0, lost: count },
   };
 }
 
-function buildPingOk(toIp: string, count: number, baseRtt: number): string {
-  const lines = ["", `Esecuzione di Ping ${toIp} con 32 byte di dati:`];
+function buildPingOk(
+  toIp: string,
+  label: string,
+  count: number,
+  baseRtt: number,
+  ttl: number,
+  warnings: string[],
+): string {
+  const lines = ["", `Esecuzione di Ping ${label} con 32 byte di dati:`];
+  const rtts: number[] = [];
   for (let i = 0; i < count; i++) {
     const rtt = baseRtt + Math.floor(Math.random() * 3);
-    lines.push(`Risposta da ${toIp}: byte=32 durata=${rtt}ms TTL=128`);
+    rtts.push(rtt);
+    lines.push(`Risposta da ${toIp}: byte=32 durata=${rtt}ms TTL=${ttl}`);
   }
   lines.push("");
   lines.push(`Statistiche Ping per ${toIp}:`);
   lines.push(
     `    Pacchetti: Trasmessi = ${count}, Ricevuti = ${count}, Persi = 0 (0% persi),`,
   );
-  lines.push(
-    `    Minimo = ${baseRtt}ms, Massimo = ${baseRtt + 2}ms, Medio = ${baseRtt + 1}ms`,
-  );
+  lines.push("Tempo approssimativo percorsi andata/ritorno in millisecondi:");
+  const min = Math.min(...rtts);
+  const max = Math.max(...rtts);
+  const avg = Math.round(rtts.reduce((a, b) => a + b, 0) / rtts.length);
+  lines.push(`    Minimo = ${min}ms, Massimo = ${max}ms, Medio = ${avg}ms`);
+  for (const w of warnings) lines.push(w);
   return lines.join("\n");
 }
 

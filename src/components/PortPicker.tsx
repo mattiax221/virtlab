@@ -6,8 +6,9 @@ import { DeviceIcon } from "./DeviceIcon";
 
 function portStatus(iface: InterfaceConfig): string {
   if (iface.parentIfaceId) return "subinterface";
-  if (!iface.enabled) return "shutdown";
   if (iface.connectedLinkId) return "occupata";
+  // Una porta in shutdown si può cablare (resta spenta finché non fai no shutdown)
+  if (!iface.enabled) return "libera · shutdown";
   return "libera";
 }
 
@@ -47,7 +48,7 @@ export function PortPicker({
   const ports = [...device.interfaces.filter((i) => !i.parentIfaceId && !i.sviVlan)].sort(
     comparePorts,
   );
-  const free = ports.filter((i) => !i.connectedLinkId && i.enabled);
+  const free = ports.filter((i) => !i.connectedLinkId);
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm">
@@ -94,7 +95,7 @@ export function PortPicker({
                 (peerMedia !== "wireless" && iface.media === "wireless") ||
                 (peerMedia === "serial" && iface.media !== "serial") ||
                 (iface.media === "serial" && peerMedia !== "serial"));
-            const available = status === "libera" && !mediaMismatch;
+            const available = status.startsWith("libera") && !mediaMismatch;
             const note = mediaMismatch
               ? peerMedia === "wireless"
                 ? "serve Wi‑Fi"

@@ -93,7 +93,7 @@ export function buildPingSimulation(
     ok: result.ok,
     detail: result.ok
       ? `Echo request → ${dest}`
-      : `Echo fallito: ${result.message.split("\n")[0]}`,
+      : `Echo fallito: ${(result.reason ?? result.message.split("\n")[0])}`,
   });
 
   if (result.ok && path.length >= 2) {
@@ -256,7 +256,10 @@ export function buildHttpSimulation(
     destIp = resolved;
   }
 
-  const { result, state: afterPing } = runPing(next, fromDeviceId, destIp);
+  const { result, state: afterPing } = runPing(next, fromDeviceId, destIp, 1, {
+    proto: "tcp",
+    port: 80,
+  });
   next = afterPing;
   const path = hopsToPath(next, result.hops, {
     allowWireless: sourceUsesWireless(next, fromDeviceId, destIp),
@@ -305,7 +308,7 @@ export function buildHttpSimulation(
       detail: ok
         ? `200 OK (${http.output.split("\n").slice(-2).join(" ").slice(0, 48)}…)`
         : !reachable
-          ? result.message.split("\n")[0] || "Non raggiungibile"
+          ? (result.reason ?? result.message.split("\n")[0]) || "Non raggiungibile"
           : http.output || "HTTP fallito",
     });
   }
@@ -316,7 +319,7 @@ export function buildHttpSimulation(
     message: ok
       ? `HTTP OK da ${host}`
       : !reachable
-        ? result.message.split("\n")[0] || "HTTP: non raggiungibile"
+        ? (result.reason ?? result.message.split("\n")[0]) || "HTTP: non raggiungibile"
         : http.output || "HTTP fallito",
   };
 }

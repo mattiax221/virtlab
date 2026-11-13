@@ -39,7 +39,7 @@ export function sendPrintJob(
     return {
       ok: false,
       state: next,
-      message: `print: ${ip} non raggiungibile\n${result.message.split("\n")[0]}`,
+      message: `print: ${ip} non raggiungibile\n${(result.reason ?? result.message.split("\n")[0])}`,
     };
   }
 

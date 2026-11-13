@@ -48,6 +48,8 @@ export function WebBrowser({
       stateRef.current,
       device.id,
       dest,
+      1,
+      { proto: "tcp", port: 80 },
     );
     stateRef.current = afterPing;
     setState(afterPing);
@@ -58,7 +60,7 @@ export function WebBrowser({
         `<html><body style="font-family:Segoe UI,sans-serif;padding:24px;color:#333">
           <h2>This page can't be displayed</h2>
           <p>Make sure the web address <b>${escapeHtml(typed)}</b> is correct.</p>
-          <p style="color:#666;font-size:13px">${escapeHtml(result.message.split("\n")[0] ?? "")}</p>
+          <p style="color:#666;font-size:13px">${escapeHtml((result.reason ?? result.message.split("\n")[0]) ?? "")}</p>
         </body></html>`,
       );
       setBusy(false);

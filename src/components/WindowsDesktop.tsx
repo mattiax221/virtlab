@@ -968,7 +968,7 @@ function SshClientPanel({
     stateRef.current = state;
     setState(state);
     if (!result.ok) {
-      setStatus(`Connessione fallita — ${result.message.split("\n")[0]}`);
+      setStatus(`Connessione fallita — ${(result.reason ?? result.message.split("\n")[0])}`);
       setSession(null);
       return;
     }

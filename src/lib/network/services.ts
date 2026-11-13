@@ -1,6 +1,7 @@
-import { getDevice } from "./engine-helpers";
-import { formatIp, parseIp } from "./ip";
+import { getDevice, getIface } from "./engine-helpers";
+import { formatIp, parseIp, sameSubnet } from "./ip";
 import { l2Flood } from "./l2";
+import { canRoute, pickSourceIface, roundTrip } from "./routing";
 import type {
   Device,
   DeviceServices,
@@ -237,43 +238,84 @@ export function requestDhcp(
     };
   }
 
-  const flood = l2Flood(state, clientId, { sourceMac: iface.mac });
+  // DHCPDISCOVER: broadcast nella LAN/VLAN dell’interfaccia (non attraversa router)
+  const flood = l2Flood(state, clientId, {
+    sourceMac: iface.mac,
+    viaIfaceId: iface.id,
+  });
   let next = flood.state;
 
-  const servers: Device[] = [];
-  const seen = new Set<string>();
+  let server: Device | undefined;
+  /** Indirizzo del relay (giaddr) se la richiesta passa da ip helper-address */
+  let relayIp: string | null = null;
   for (const h of flood.hosts) {
+    if (h.device.id === clientId) continue;
     const d = getDevice(next, h.device.id);
-    if (!d || seen.has(d.id)) continue;
-    const dhcp = normalizeDhcp(d.services?.dhcp);
-    if (dhcp?.enabled) {
-      servers.push(d);
-      seen.add(d.id);
+    if (d?.powered && normalizeDhcp(d.services?.dhcp)?.enabled) {
+      server = d;
+      break;
     }
   }
-  for (const d of next.devices) {
-    if (seen.has(d.id)) continue;
-    const dhcp = normalizeDhcp(d.services?.dhcp);
-    if (!dhcp?.enabled) continue;
-    const back = l2Flood(next, d.id);
-    next = back.state;
-    if (back.hosts.some((h) => h.device.id === clientId)) {
-      servers.push(getDevice(next, d.id)!);
-      seen.add(d.id);
+  if (!server) {
+    // Relay: interfaccia di router nella stessa LAN con ip helper-address
+    for (const h of flood.hosts) {
+      const helper = h.iface.helperAddress;
+      if (!helper || !h.iface.ip || !canRoute(h.device)) continue;
+      const target = next.devices.find(
+        (d) =>
+          d.powered &&
+          normalizeDhcp(d.services?.dhcp)?.enabled &&
+          d.interfaces.some((i) => i.ip === helper),
+      );
+      if (!target) continue;
+      const routerIf = getIface(h.device, h.iface.id)!;
+      const out = pickSourceIface(next, h.device, helper);
+      if (!out) continue;
+      const rt = roundTrip(next, h.device, out, helper, "udp", 67);
+      next = rt.state;
+      if (!rt.ok) {
+        return {
+          state: next,
+          ok: false,
+          message: `Timeout DHCP: il relay ${h.device.name} non raggiunge il server ${helper} (${rt.message ?? "nessuna rotta"}).`,
+        };
+      }
+      server = getDevice(next, target.id);
+      relayIp = routerIf.ip;
+      break;
     }
   }
 
-  if (servers.length === 0) {
+  if (!server) {
     return {
       state: next,
       ok: false,
-      message: "Timeout DHCP: nessun server DHCP nella VLAN/LAN.",
+      message:
+        "Timeout DHCP: nessun server DHCP nella VLAN/LAN (oltre un router serve ip helper-address).",
     };
   }
 
-  const server = servers[0];
   const dhcpSvc = normalizeDhcp(server.services!.dhcp)!;
-  const pool = dhcpSvc.pools[0];
+  // Pool: quello della subnet del relay, altrimenti quello della subnet del server
+  const serverIp =
+    server.interfaces.find((i) => i.ip && flood.hosts.some((h) => h.iface.id === i.id))?.ip ??
+    server.interfaces.find((i) => i.ip)?.ip ??
+    null;
+  const subnetIp = relayIp ?? serverIp;
+  let poolIndex = dhcpSvc.pools.findIndex(
+    (p) => subnetIp && p.startIp && p.mask && sameSubnet(p.startIp, subnetIp, p.mask),
+  );
+  if (poolIndex < 0) {
+    if (relayIp) {
+      return {
+        state: next,
+        ok: false,
+        message: `Timeout DHCP: sul server ${server.name} nessun pool per la rete di ${relayIp}.`,
+      };
+    }
+    poolIndex = 0;
+  }
+  const pool = dhcpSvc.pools[poolIndex];
   if (!pool) {
     return { state: next, ok: false, message: "Nessun pool DHCP." };
   }
@@ -310,7 +352,7 @@ export function requestDhcp(
     ifaceId,
   });
   const pools = dhcpSvc.pools.map((p, i) =>
-    i === 0 ? { ...p, leases } : p,
+    i === poolIndex ? { ...p, leases } : p,
   );
 
   next = {
@@ -520,17 +562,32 @@ export function resolveDnsQuery(
     for (const d of i.dnsServers) dnsIps.add(d);
   }
 
-  const flood = l2Flood(state, clientId);
+  // Server DNS: quelli configurati sul client, se raggiungibili (andata e
+  // ritorno); senza DNS configurati, solo quelli nella stessa LAN.
   const candidates: Device[] = [];
-  for (const d of flood.state.devices) {
-    if (!d.services?.dns?.enabled) continue;
-    const hasIp = d.interfaces.some((i) => i.ip && dnsIps.has(i.ip));
-    const inDomain = flood.hosts.some((h) => h.device.id === d.id);
-    if (hasIp || inDomain || dnsIps.size === 0) candidates.push(d);
-  }
-  if (candidates.length === 0) {
-    for (const d of state.devices) {
-      if (d.services?.dns?.enabled) candidates.push(d);
+  if (dnsIps.size > 0) {
+    for (const dnsIp of dnsIps) {
+      const d = state.devices.find(
+        (x) =>
+          x.powered &&
+          x.services?.dns?.enabled &&
+          x.interfaces.some((i) => i.ip === dnsIp),
+      );
+      if (!d || candidates.includes(d)) continue;
+      if (d.id === client.id) {
+        candidates.push(d);
+        continue;
+      }
+      const src = pickSourceIface(state, client, dnsIp);
+      if (!src?.ip) continue;
+      if (roundTrip(state, client, src, dnsIp, "udp", 53).ok) candidates.push(d);
+    }
+  } else {
+    const flood = l2Flood(state, clientId);
+    for (const h of flood.hosts) {
+      if (h.device.services?.dns?.enabled && !candidates.includes(h.device)) {
+        candidates.push(h.device);
+      }
     }
   }
 
@@ -600,9 +657,12 @@ export function fetchHttp(
     return { ok: false, output: `Nessun servizio HTTP su ${ip}`, destIp: ip };
   }
   if (!opts?.reachable) {
-    const flood = l2Flood(state, clientId);
-    const onL2 = flood.hosts.some((h) => h.device.id === server!.id);
-    if (!onL2) {
+    const client = getDevice(state, clientId);
+    const src = client ? pickSourceIface(state, client, ip) : null;
+    const reachable =
+      client?.id === server.id ||
+      (client && src?.ip ? roundTrip(state, client, src, ip, "tcp", 80).ok : false);
+    if (!reachable) {
       return {
         ok: false,
         output: `Host ${ip} non raggiungibile (verifica routing / usa ping).`,

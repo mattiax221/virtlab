@@ -94,7 +94,7 @@ export function MibBrowser({
     setState(state);
     if (!result.ok) {
       setRows([]);
-      setStatus(`SNMP timeout — ${result.message.split("\n")[0]}`);
+      setStatus(`SNMP timeout — ${(result.reason ?? result.message.split("\n")[0])}`);
       return;
     }
     const target = state.devices.find((d) =>
