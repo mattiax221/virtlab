@@ -11,6 +11,7 @@ import {
   wifiStatusLabel,
 } from "@/lib/network/wifi";
 import type { Device, LabState } from "@/lib/network/types";
+import { useLabState } from "./LabStateContext";
 
 export function WifiTray({
   device,
@@ -27,13 +28,12 @@ export function WifiTray({
   const [error, setError] = useState<string | null>(null);
   const [, bump] = useState(0);
 
-  const live =
-    stateRef.current.devices.find((d) => d.id === device.id) ?? device;
-  const status = wifiStatusLabel(stateRef.current, live.id);
+  const lab = useLabState();
+  const live = lab.devices.find((d) => d.id === device.id) ?? device;
+  const status = wifiStatusLabel(lab, live.id);
   const networks = useMemo(
-    () => scanWifiNetworks(stateRef.current, live.id),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [live.id, open, stateRef.current.links.length, stateRef.current.devices],
+    () => scanWifiNetworks(lab, live.id),
+    [lab, live.id],
   );
 
   function refresh() {

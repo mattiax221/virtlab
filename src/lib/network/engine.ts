@@ -438,6 +438,10 @@ export function createDemoLab(): LabState {
   rtr.interfaces[1].mask = "255.255.255.252";
   modem.interfaces[0].ip = "10.0.0.1";
   modem.interfaces[0].mask = "255.255.255.252";
+  // Rotta di ritorno verso la LAN, altrimenti il modem non sa rispondere
+  modem.routes = [
+    { network: "192.168.1.0", mask: "255.255.255.0", nextHop: "10.0.0.2" },
+  ];
 
   const linksSpec: [Device, number, Device, number][] = [
     [pc1, 0, sw, 0],

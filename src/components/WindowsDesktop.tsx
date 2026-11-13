@@ -44,6 +44,7 @@ import { TrafficGenerator } from "./TrafficGenerator";
 import { VpnClient } from "./VpnClient";
 import { WebBrowser } from "./WebBrowser";
 import { WifiTray } from "./WifiTray";
+import { useLabState } from "./LabStateContext";
 
 type AppId =
   | "ipconfig"
@@ -113,7 +114,7 @@ const SHORTCUTS_WIN: Shortcut[] = [
   { id: "ssh", label: "Telnet / SSH", icon: "ssh" },
   { id: "firewall", label: "Firewall", icon: "firewall" },
   { id: "mib", label: "MIB Browser", icon: "mib" },
-  { id: "voip", label: "IP Communicator", icon: "voip", stub: true },
+  { id: "voip", label: "IP Communicator (in arrivo)", icon: "voip", stub: true },
   { id: "physical", label: "Physical", icon: "physical" },
   { id: "services", label: "Services", icon: "services", serverOnly: true },
 ];
@@ -133,7 +134,7 @@ const SHORTCUTS_LINUX: Shortcut[] = [
   { id: "ssh", label: "Telnet / SSH", icon: "ssh" },
   { id: "firewall", label: "Firewall", icon: "firewall" },
   { id: "mib", label: "MIB Browser", icon: "mib" },
-  { id: "voip", label: "IP Communicator", icon: "voip", stub: true },
+  { id: "voip", label: "IP Communicator (in arrivo)", icon: "voip", stub: true },
   { id: "physical", label: "Physical", icon: "physical" },
   { id: "services", label: "Services", icon: "services", serverOnly: true },
 ];
@@ -157,8 +158,8 @@ export function WindowsDesktop({
   /** Nome dell’host da cui è partita la sessione RDP */
   viaHost?: string;
 }) {
-  const live =
-    stateRef.current.devices.find((d) => d.id === device.id) ?? device;
+  const lab = useLabState();
+  const live = lab.devices.find((d) => d.id === device.id) ?? device;
   const eth = live.interfaces.find((i) => !i.parentIfaceId);
   const isServer =
     live.type === "server" || live.type === "meraki_server";

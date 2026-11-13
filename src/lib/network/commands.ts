@@ -1335,7 +1335,20 @@ export function runRouterCommand(
     return { output: "Enter configuration commands, one per line. End with CNTL/Z." };
   }
 
-  if (lower === "exit" || lower === "end") {
+  if (lower === "end" || lower === "^z") {
+    // end riporta sempre alla modalità privilegiata
+    if (cli.mode.startsWith("config")) {
+      setCli({ ...cli, mode: "enable", ifaceId: null, vlanId: null });
+    }
+    return { output: "" };
+  }
+
+  if (lower.startsWith("do ") && cli.mode.startsWith("config")) {
+    // "do show …" dalla configurazione, come su IOS
+    return runRouterCommand(line.slice(3), ctx, { ...cli, mode: "enable" }, () => {});
+  }
+
+  if (lower === "exit") {
     if (cli.mode === "config-if") {
       setCli({ ...cli, mode: "config", ifaceId: null });
       return { output: "" };

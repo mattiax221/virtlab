@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { runPing } from "@/lib/network/engine";
 import type { Device, LabState } from "@/lib/network/types";
+import { useLabState } from "./LabStateContext";
 
 /**
  * PPPoE Dialer Desktop utility (Packet Tracer style).
@@ -18,8 +19,8 @@ export function PppoeDialer({
   setState: (next: LabState) => void;
   onClose: () => void;
 }) {
-  const live =
-    stateRef.current.devices.find((d) => d.id === device.id) ?? device;
+  const lab = useLabState();
+  const live = lab.devices.find((d) => d.id === device.id) ?? device;
   const [user, setUser] = useState(live.pppoe?.username ?? "cisco");
   const [password, setPassword] = useState("cisco");
   const [serverIp, setServerIp] = useState(

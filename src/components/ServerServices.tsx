@@ -18,6 +18,7 @@ import type {
   LabState,
   ServerUser,
 } from "@/lib/network/types";
+import { useLabState } from "./LabStateContext";
 
 type TopTab = "config" | "services";
 type ConfigNav = "settings" | "algorithm" | string; // string = iface id
@@ -55,8 +56,8 @@ export function ServerServices({
   setState: (next: LabState) => void;
   onClose: () => void;
 }) {
-  const live =
-    stateRef.current.devices.find((d) => d.id === device.id) ?? device;
+  const lab = useLabState();
+  const live = lab.devices.find((d) => d.id === device.id) ?? device;
   const svc = live.services;
 
   const [top, setTop] = useState<TopTab>("services");

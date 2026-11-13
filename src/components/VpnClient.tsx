@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { runPing } from "@/lib/network/engine";
 import type { Device, LabState } from "@/lib/network/types";
+import { useLabState } from "./LabStateContext";
 
 /**
  * VPN Desktop utility (Packet Tracer style).
@@ -18,8 +19,8 @@ export function VpnClient({
   setState: (next: LabState) => void;
   onClose: () => void;
 }) {
-  const live =
-    stateRef.current.devices.find((d) => d.id === device.id) ?? device;
+  const lab = useLabState();
+  const live = lab.devices.find((d) => d.id === device.id) ?? device;
   const [groupName, setGroupName] = useState(
     live.vpn?.groupName ?? "netlab",
   );

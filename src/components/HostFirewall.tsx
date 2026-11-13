@@ -7,6 +7,7 @@ import type {
   HostFirewallRule,
   LabState,
 } from "@/lib/network/types";
+import { useLabState } from "./LabStateContext";
 
 function uid() {
   return `r${Math.random().toString(36).slice(2, 9)}`;
@@ -23,8 +24,8 @@ export function HostFirewallPanel({
   setState: (next: LabState) => void;
   onClose: () => void;
 }) {
-  const live =
-    stateRef.current.devices.find((d) => d.id === device.id) ?? device;
+  const lab = useLabState();
+  const live = lab.devices.find((d) => d.id === device.id) ?? device;
   const fw: HostFirewall = live.hostFirewall ?? defaultHostFirewall();
 
   function patch(next: HostFirewall) {

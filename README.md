@@ -20,14 +20,17 @@ Laboratorio stile **Cisco Packet Tracer** nel browser.
 - **DHCP / DNS / HTTP** sul Server-PT (`ipconfig /renew`, `nslookup www.lab`, Web Browser → `www.lab`)
 - **DHCP automatico** quando colleghi il cavo Ethernet a un host senza IP
 - **ARP reale**: cache su host (`arp -a`) e router (`show arp`); si aggiorna con i ping
-- **Routing statico**: `ip route` / `show ip route` tra due router
+- **Routing statico**: `ip route` / `show ip route` tra router; il ping verifica andata **e ritorno**
+- **Switch multilayer**: `ip routing` + SVI (`interface vlan N`) per il routing tra VLAN
+- **DHCP relay**: `ip helper-address` sul router, un pool per subnet sul Server-PT
+- **STP 802.1D**: root bridge, root port e porte bloccate anche negli anelli; `spanning-tree vlan N priority`
 - **Salva / Carica** lab in JSON + autosave locale
 - **Condividi link** (`#lab=…`): snapshot statico nell’URL (ripremi Condividi dopo modifiche), niente account/database
 - **Autosave** locale con ripristino all’apertura (prompt)
 - **Simulation**: ARP, ICMP, DHCP, DNS, HTTP (click destinazione Server)
 - Trascina i dispositivi dalla barra sotto sul canvas (snap griglia + Annulla/Ripeti)
 - **WAN Serial**: cavo Serial + `clock rate` sul DCE
-- **ACL** base Cisco-like (`access-list`, `ip access-group`)
+- **ACL** Cisco-like: standard 1-99 e estese 100-199 con wildcard, `tcp/udp eq porta` (`access-list`, `ip access-group`)
 - Esercizi guidati VLAN (access + trunk + router-on-a-stick)
 - Motore L2/L3 con flood VLAN-aware + learning MAC
 

@@ -24,6 +24,23 @@ import {
 
 const MAX_HOPS = 16;
 
+/** Router domestici: fanno NAT (PAT) verso l’interfaccia della rotta di default. */
+export function isNatDevice(device: Device): boolean {
+  return (
+    device.type === "wireless_router" ||
+    device.type === "home_router" ||
+    device.type === "home_gateway"
+  );
+}
+
+function defaultRouteEgress(state: LabState, device: Device): InterfaceConfig | null {
+  const def = (device.routes ?? []).find(
+    (r) => r.network === "0.0.0.0" && (r.mask === "0.0.0.0" || r.mask === "0"),
+  );
+  if (!def) return null;
+  return connectedIfaceFor(state, device, def.nextHop);
+}
+
 /** Il dispositivo inoltra pacchetti tra le sue reti? */
 export function canRoute(device: Device): boolean {
   if (!isL3Device(device.type)) return false;
@@ -162,6 +179,8 @@ export type Delivery = {
   rejectedBy?: { device: Device; ip: string };
   target?: L2Endpoint;
   warnings: string[];
+  /** Traduzione NAT avvenuta lungo il percorso */
+  nat?: { device: Device; insideIp: string; outsideIp: string };
 };
 
 /**
@@ -184,6 +203,7 @@ export function deliver(
   let current: Device = from;
   let ingress: InterfaceConfig | null = null;
   let originated = true;
+  let nat: Delivery["nat"];
   const fail = (reason: string, rejectedBy?: Delivery["rejectedBy"]): Delivery => ({
     ok: false,
     state: next,
@@ -191,6 +211,7 @@ export function deliver(
     reason,
     rejectedBy,
     warnings,
+    nat,
   });
 
   for (let step = 0; step < MAX_HOPS; step++) {
@@ -206,7 +227,7 @@ export function deliver(
         const acl = routerAclCheck(current, ingress, null, srcIp, dstIp, proto, dstPort);
         if (!acl.ok) return fail(acl.reason!);
       }
-      return { ok: true, state: next, hops, target: { device: current, iface: own }, warnings };
+      return { ok: true, state: next, hops, target: { device: current, iface: own }, warnings, nat };
     }
 
     // Scelta di uscita e next hop
@@ -246,6 +267,18 @@ export function deliver(
     if (!originated) {
       const acl = routerAclCheck(current, ingress, egress, srcIp, dstIp, proto, dstPort);
       if (!acl.ok) return fail(acl.reason!, { device: current, ip: ingress?.ip ?? "" });
+      // NAT dei router domestici: LAN → interfaccia della rotta di default
+      if (
+        !nat &&
+        isNatDevice(current) &&
+        ingress &&
+        egress.id !== ingress.id &&
+        egress.ip &&
+        defaultRouteEgress(next, current)?.id === egress.id
+      ) {
+        nat = { device: current, insideIp: srcIp, outsideIp: egress.ip };
+        srcIp = egress.ip;
+      }
     }
 
     const knownMac = current.arpTable?.find((e) => e.ip === nextHop)?.mac;
@@ -291,6 +324,7 @@ export function deliver(
         hops,
         target: { device: live, iface: getIface(live, peer.iface.id) ?? peer.iface },
         warnings,
+        nat,
       };
     }
 
@@ -364,12 +398,22 @@ export function roundTrip(
     return { ok: false, state: go.state, hops: go.hops, message: fwIn, replyLost: true, warnings: go.warnings };
   }
   // Ritorno: lo genera il destinatario verso il mittente
+  const replyTo = go.nat ? go.nat.outsideIp : srcIp;
   const replyIface =
     canRoute(target.device)
-      ? routeLookup(go.state, target.device, srcIp)?.egress ?? target.iface
+      ? routeLookup(go.state, target.device, replyTo)?.egress ?? target.iface
       : target.iface;
   const replySrc = canRoute(target.device) ? dstIp : (target.iface.ip ?? dstIp);
-  const back = deliver(go.state, target.device, replyIface, replySrc, srcIp, proto);
+  // Con NAT la risposta va all’indirizzo esterno del router domestico,
+  // che poi la ritraduce verso l’host interno.
+  let back = deliver(go.state, target.device, replyIface, replySrc, replyTo, proto);
+  if (back.ok && go.nat) {
+    const natDev = getDevice(back.state, go.nat.device.id)!;
+    const inside = routeLookup(back.state, natDev, srcIp);
+    back = inside
+      ? deliver(back.state, natDev, inside.egress, replySrc, srcIp, proto)
+      : { ...back, ok: false, reason: `${natDev.name}: nessuna rotta verso ${srcIp}.` };
+  }
   if (!back.ok) {
     return {
       ok: false,

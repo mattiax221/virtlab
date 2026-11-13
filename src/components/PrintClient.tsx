@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { buildPrintSimulation, type SimPacket } from "@/lib/network/simulation";
 import type { Device, LabState } from "@/lib/network/types";
+import { useLabState } from "./LabStateContext";
 
 /**
  * Client stampanti di rete: invia un job LPR e anima il percorso sulla griglia.
@@ -20,8 +21,9 @@ export function PrintClient({
   onClose: () => void;
   onPrint?: (packets: SimPacket[], message: string) => void;
 }) {
+  const lab = useLabState();
   const printers = useMemo(() => {
-    return stateRef.current.devices
+    return lab.devices
       .filter((d) => d.type === "printer")
       .map((d) => ({
         id: d.id,
@@ -31,7 +33,7 @@ export function PrintClient({
         powered: d.powered,
         enabled: d.printerService?.enabled !== false,
       }));
-  }, [stateRef, device.id]);
+  }, [lab]);
 
   const [dest, setDest] = useState(
     () => printers.find((p) => p.ip)?.ip ?? "192.168.1.50",

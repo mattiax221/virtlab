@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { updateIface } from "@/lib/network/engine";
 import { requestDhcp } from "@/lib/network/services";
 import type { Device, LabState } from "@/lib/network/types";
+import { useLabState } from "./LabStateContext";
 
 type View = "folder" | "adapter" | "tcpip";
 
@@ -71,8 +72,8 @@ export function NetworkConnections({
   setState: (next: LabState) => void;
   onClose: () => void;
 }) {
-  const live =
-    stateRef.current.devices.find((d) => d.id === device.id) ?? device;
+  const lab = useLabState();
+  const live = lab.devices.find((d) => d.id === device.id) ?? device;
   const adapters = live.interfaces.filter((i) => !i.parentIfaceId);
   const defaultAdapter =
     adapters.find(
@@ -84,7 +85,6 @@ export function NetworkConnections({
     adapters[0];
   const [ifaceId, setIfaceId] = useState(defaultAdapter?.id ?? "");
   const iface = adapters.find((i) => i.id === ifaceId) ?? adapters[0];
-  const linked = Boolean(iface?.connectedLinkId);
 
   const [view, setView] = useState<View>("folder");
   const [selectedComp, setSelectedComp] = useState<string>("ipv4");

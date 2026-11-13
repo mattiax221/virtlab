@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { setDevicePower, updateDevice, updateIface } from "@/lib/network/engine";
 import { isValidIp, parseMask } from "@/lib/network/ip";
 import { requestDhcp, releaseDhcp } from "@/lib/network/services";
 import type { Device, LabState, PrinterService } from "@/lib/network/types";
 import { PhysicalPanel } from "./PhysicalPanel";
+import { useLabState } from "./LabStateContext";
 
 type Tab = "config" | "physical" | "services";
 
@@ -30,8 +31,8 @@ export function PrinterPanel({
   setState: (next: LabState) => void;
   onClose: () => void;
 }) {
-  const live =
-    stateRef.current.devices.find((d) => d.id === device.id) ?? device;
+  const lab = useLabState();
+  const live = lab.devices.find((d) => d.id === device.id) ?? device;
   const iface =
     live.interfaces.find(
       (i) =>
@@ -52,26 +53,22 @@ export function PrinterPanel({
   const [location, setLocation] = useState(svc.location ?? "");
   const [paper, setPaper] = useState(svc.paper ?? "A4");
 
-  useEffect(() => {
-    const d =
-      stateRef.current.devices.find((x) => x.id === device.id) ?? device;
-    const i =
-      d.interfaces.find(
-        (x) =>
-          !x.parentIfaceId &&
-          (x.media === "ethernet" || x.media === "fiber"),
-      ) ?? d.interfaces.find((x) => !x.parentIfaceId);
-    setName(d.name);
-    setDhcp(Boolean(i?.dhcpClient) || !i?.ip);
-    setIp(i?.ip ?? "");
-    setMask(i?.mask ?? "255.255.255.0");
-    setGw(i?.gateway ?? "");
-    setDns(i?.dnsServers?.[0] ?? "");
-    const s = d.printerService ?? defaultPrinterService(d.name);
-    setShareName(s.shareName);
-    setLocation(s.location ?? "");
-    setPaper(s.paper ?? "A4");
-  }, [device.id, stateRef, live.powered, iface?.ip, iface?.dhcpClient]);
+  // Riallinea il form quando cambiano il dispositivo o il suo indirizzo
+  // (stato derivato aggiornato durante il render, senza effetto a cascata)
+  const syncKey = `${device.id}|${live.powered}|${iface?.ip ?? ""}|${iface?.dhcpClient ?? ""}`;
+  const [lastSyncKey, setLastSyncKey] = useState(syncKey);
+  if (lastSyncKey !== syncKey) {
+    setLastSyncKey(syncKey);
+    setName(live.name);
+    setDhcp(Boolean(iface?.dhcpClient) || !iface?.ip);
+    setIp(iface?.ip ?? "");
+    setMask(iface?.mask ?? "255.255.255.0");
+    setGw(iface?.gateway ?? "");
+    setDns(iface?.dnsServers?.[0] ?? "");
+    setShareName(svc.shareName);
+    setLocation(svc.location ?? "");
+    setPaper(svc.paper ?? "A4");
+  }
 
   function applyName() {
     const next = updateDevice(stateRef.current, device.id, {

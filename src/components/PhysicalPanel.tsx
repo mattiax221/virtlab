@@ -10,6 +10,7 @@ import {
 } from "@/lib/network/engine";
 import type { ModuleKind } from "@/lib/network/modules";
 import type { Device, LabState } from "@/lib/network/types";
+import { useLabState } from "./LabStateContext";
 
 export function PhysicalPanel({
   device,
@@ -20,8 +21,8 @@ export function PhysicalPanel({
   stateRef: React.MutableRefObject<LabState>;
   setState: (next: LabState) => void;
 }) {
-  const live =
-    stateRef.current.devices.find((d) => d.id === device.id) ?? device;
+  const lab = useLabState();
+  const live = lab.devices.find((d) => d.id === device.id) ?? device;
   const catalog = availableModulesFor(live.type);
 
   function apply(next: LabState) {
