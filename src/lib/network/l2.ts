@@ -103,202 +103,174 @@ function learnMac(
 }
 
 /**
- * VLAN-aware L2 flood from a starting device.
- * Returns hosts with IP that share the same broadcast domain (VLAN path).
- * Also returns updated state with MAC learning applied along the walk.
+ * Propagazione L2 (broadcast) a partire da un dispositivo.
+ *
+ * Restituisce le interfacce con IP che stanno nello stesso dominio di
+ * broadcast e applica il learning MAC sugli switch attraversati.
+ *
+ * Regole:
+ * - switch gestiti: VLAN access/trunk, tag 802.1Q, native VLAN, STP;
+ * - hub, AP, cloud: ripetono il frame così com’è;
+ * - host e router sono estremi: il frame si ferma lì (un router NON
+ *   inoltra i broadcast). Solo il dispositivo di partenza trasmette.
+ *
+ * opts.viaIfaceId limita l’uscita del dispositivo di partenza a quella porta;
+ * opts.vlanHint + opts.tagged descrivono un frame che parte già taggato
+ * (sottointerfaccia del router) o, se si parte da uno switch, la VLAN della SVI.
  */
 export function l2Flood(
   state: LabState,
   startDeviceId: string,
-  opts?: { sourceMac?: string; destMac?: string; vlanHint?: number },
+  opts?: {
+    sourceMac?: string;
+    destMac?: string;
+    vlanHint?: number;
+    tagged?: boolean;
+    viaIfaceId?: string;
+  },
 ): { hosts: L2Endpoint[]; state: LabState } {
   let nextState = state;
   const hosts: L2Endpoint[] = [];
   const seenHostIf = new Set<string>();
-
-  // BFS of (deviceId, vlanId, ingressPortId|null)
-  type Node = {
-    deviceId: string;
-    vlan: number | null;
-    ingressPortId: string | null;
-    fromDeviceId: string | null;
+  const addHost = (device: Device, iface: InterfaceConfig) => {
+    if (!iface.ip || !iface.enabled || seenHostIf.has(iface.id)) return;
+    seenHostIf.add(iface.id);
+    hosts.push({ device, iface });
   };
-  const queue: Node[] = [
-    {
-      deviceId: startDeviceId,
-      vlan: opts?.vlanHint ?? null,
-      ingressPortId: null,
-      fromDeviceId: null,
-    },
-  ];
-  const visited = new Set<string>(); // `${deviceId}:${vlan ?? 'x'}:${ingress}`
 
-  while (queue.length) {
-    const node = queue.shift()!;
-    const key = `${node.deviceId}:${node.vlan ?? "x"}:${node.ingressPortId ?? "-"}`;
-    if (visited.has(key)) continue;
-    visited.add(key);
+  type Frame = { vlan: number | null; tagged: boolean };
+  type Node = Frame & { deviceId: string; ingressPortId: string | null };
 
-    const device = getDevice(nextState, node.deviceId);
-    if (!device) continue;
-    // Device spenti non inoltrano (né rispondono come host L2)
-    if (!device.powered) continue;
+  const start = getDevice(nextState, startDeviceId);
+  if (!start || !start.powered) return { hosts, state };
 
-    // Learn source MAC on managed switch ingress
-    if (
-      opts?.sourceMac &&
-      node.ingressPortId &&
-      node.vlan != null &&
-      isManagedSwitch(device.type)
-    ) {
-      nextState = learnMac(
-        nextState,
-        device.id,
-        node.ingressPortId,
-        opts.sourceMac,
-        node.vlan,
-      );
-    }
+  const queue: Node[] = [];
+  const visited = new Set<string>();
 
-    if (isManagedSwitch(device.type) && node.vlan != null) {
-      for (const iface of device.interfaces) {
-        if (iface.sviVlan !== node.vlan || !iface.enabled || !iface.ip) continue;
-        if (!sviHasMemberLink(device, iface.sviVlan)) continue;
-        if (seenHostIf.has(iface.id)) continue;
-        seenHostIf.add(iface.id);
-        hosts.push({ device, iface });
-      }
-    }
+  /** Accoda il frame verso il vicino `end`. */
+  const emit = (end: L2Endpoint, frame: Frame) => {
+    queue.push({
+      deviceId: end.device.id,
+      ingressPortId: end.iface.id,
+      vlan: frame.vlan,
+      tagged: frame.tagged,
+    });
+  };
 
-    if (!isL2Bridge(device.type)) {
-      for (const iface of device.interfaces) {
-        if (iface.ip && iface.enabled && !seenHostIf.has(iface.id)) {
-          seenHostIf.add(iface.id);
-          hosts.push({ device, iface });
-        }
-      }
-    }
-
+  /** Uscita da uno switch gestito sulla VLAN `vlan`. */
+  const switchEgress = (
+    device: Device,
+    vlan: number,
+    ingressPortId: string | null,
+  ) => {
+    const live = getDevice(nextState, device.id) ?? device;
+    const known = opts?.destMac
+      ? live.macTable?.find(
+          (e) =>
+            e.mac.toLowerCase() === opts.destMac!.toLowerCase() &&
+            e.vlan === vlan,
+        )
+      : undefined;
     for (const { iface, end } of linkNeighbors(nextState, device.id)) {
-      // Don't bounce back out the ingress port
-      if (node.ingressPortId && iface.id === node.ingressPortId) continue;
-
-      let vlan = node.vlan;
-
-      if (isManagedSwitch(device.type)) {
-        // Unicast: se destMac è in tabella, esci solo da quella porta
-        if (opts?.destMac && vlan != null) {
-          const live = getDevice(nextState, device.id);
-          const hit = live?.macTable?.find(
-            (e) =>
-              e.mac.toLowerCase() === opts.destMac!.toLowerCase() &&
-              e.vlan === vlan,
-          );
-          if (hit && hit.portId !== iface.id) continue;
-        }
-        // Leaving this switch via iface
-        if (vlan == null) {
-          // First hop into a switch from a host: VLAN = access/native of the
-          // port that faces the host. That is the *other* side when we just
-          // arrived — on start device we're the host; when flooding from
-          // switch without vlan, use this egress port's VLAN if access.
-          vlan = portAccessVlan(iface);
-        }
-        if (!portCarriesVlan(iface, vlan)) continue;
-
-        // Enter neighbor
-        if (isManagedSwitch(end.device.type)) {
-          // Trunk/access into another switch: VLAN must be accepted on peer port
-          if (!portCarriesVlan(end.iface, vlan)) continue;
-          queue.push({
-            deviceId: end.device.id,
-            vlan,
-            ingressPortId: end.iface.id,
-            fromDeviceId: device.id,
-          });
-        } else if (isL2Bridge(end.device.type) && !isManagedSwitch(end.device.type)) {
-          // Hub / AP / cloud — keep VLAN tag conceptually
-          queue.push({
-            deviceId: end.device.id,
-            vlan,
-            ingressPortId: end.iface.id,
-            fromDeviceId: device.id,
-          });
-        } else {
-          // End host / router — only if access VLAN matches path
-          // (router on access port belongs to that VLAN's L2 domain)
-          queue.push({
-            deviceId: end.device.id,
-            vlan,
-            ingressPortId: end.iface.id,
-            fromDeviceId: device.id,
-          });
-        }
-      } else if (
-        device.type === "hub" ||
-        device.type === "bridge" ||
-        device.type === "repeater" ||
-        device.type === "coaxial_splitter" ||
-        device.type === "access_point" ||
-        device.type === "ap_a" ||
-        device.type === "ap_ac" ||
-        device.type === "ap_n" ||
-        device.type === "ap_3702i" ||
-        device.type === "lap" ||
-        device.type === "meraki_ap" ||
-        device.type === "cloud" ||
-        device.type === "cloud_empty" ||
-        device.type === "cell_tower"
-      ) {
-        // Dumb flood — preserve VLAN if any
-        if (isManagedSwitch(end.device.type)) {
-          const enterVlan = vlan ?? portAccessVlan(end.iface);
-          if (!portCarriesVlan(end.iface, enterVlan)) continue;
-          queue.push({
-            deviceId: end.device.id,
-            vlan: enterVlan,
-            ingressPortId: end.iface.id,
-            fromDeviceId: device.id,
-          });
-        } else {
-          queue.push({
-            deviceId: end.device.id,
-            vlan,
-            ingressPortId: end.iface.id,
-            fromDeviceId: device.id,
-          });
-        }
+      if (iface.id === ingressPortId) continue;
+      if (known && known.portId !== iface.id) continue;
+      if (iface.mode === "access") {
+        if (iface.accessVlan !== vlan) continue;
+        emit(end, { vlan, tagged: false });
       } else {
-        // Host / router / modem: single hop to neighbor
-        if (isManagedSwitch(end.device.type)) {
-          const enterVlan = portAccessVlan(end.iface);
-          queue.push({
-            deviceId: end.device.id,
-            vlan: enterVlan,
-            ingressPortId: end.iface.id,
-            fromDeviceId: device.id,
-          });
-        } else if (isL2Bridge(end.device.type)) {
-          queue.push({
-            deviceId: end.device.id,
-            vlan: node.vlan,
-            ingressPortId: end.iface.id,
-            fromDeviceId: device.id,
-          });
-        } else {
-          // Direct host-to-host cable
-          queue.push({
-            deviceId: end.device.id,
-            vlan: node.vlan,
-            ingressPortId: end.iface.id,
-            fromDeviceId: device.id,
-          });
-        }
+        if (!portCarriesVlan(iface, vlan)) continue;
+        emit(end, { vlan, tagged: vlan !== iface.nativeVlan });
       }
+    }
+  };
+
+  // ---- dispositivo di partenza ----
+  if (isManagedSwitch(start.type)) {
+    // Traffico generato dallo switch stesso (SVI): esce sulla VLAN indicata
+    const vlan = opts?.vlanHint ?? 1;
+    visited.add(`${start.id}:${vlan}:-`);
+    for (const iface of start.interfaces) {
+      if (iface.sviVlan === vlan) addHost(start, iface);
+    }
+    switchEgress(start, vlan, null);
+  } else {
+    for (const iface of start.interfaces) {
+      if (opts?.viaIfaceId && iface.id !== opts.viaIfaceId) {
+        if (iface.parentIfaceId !== opts.viaIfaceId) continue;
+      }
+      addHost(start, iface);
+    }
+    for (const { iface, end } of linkNeighbors(nextState, start.id)) {
+      if (opts?.viaIfaceId && iface.id !== opts.viaIfaceId) continue;
+      emit(end, {
+        vlan: opts?.tagged ? (opts.vlanHint ?? null) : null,
+        tagged: Boolean(opts?.tagged && opts.vlanHint != null),
+      });
     }
   }
 
-  // Refresh host device refs from nextState
+  // ---- propagazione ----
+  while (queue.length) {
+    const node = queue.shift()!;
+    const device = getDevice(nextState, node.deviceId);
+    if (!device || !device.powered) continue;
+    const ingress = device.interfaces.find((i) => i.id === node.ingressPortId);
+    if (!ingress) continue;
+
+    if (isManagedSwitch(device.type)) {
+      // VLAN assegnata dalla porta d’ingresso
+      let vlan: number;
+      if (ingress.mode === "access") {
+        if (node.tagged) continue; // una porta access scarta i frame taggati
+        vlan = ingress.accessVlan;
+      } else if (node.tagged && node.vlan != null) {
+        vlan = node.vlan;
+      } else {
+        vlan = ingress.nativeVlan;
+      }
+      if (!portCarriesVlan(ingress, vlan)) continue;
+      const key = `${device.id}:${vlan}:${ingress.id}`;
+      if (visited.has(key)) continue;
+      visited.add(key);
+
+      if (opts?.sourceMac) {
+        nextState = learnMac(nextState, device.id, ingress.id, opts.sourceMac, vlan);
+      }
+      for (const iface of device.interfaces) {
+        if (iface.sviVlan !== vlan) continue;
+        if (!sviHasMemberLink(device, vlan)) continue;
+        addHost(device, iface);
+      }
+      switchEgress(device, vlan, ingress.id);
+      continue;
+    }
+
+    if (isL2Bridge(device.type)) {
+      // Hub / AP / cloud: ripete il frame su tutte le altre porte
+      const key = `${device.id}:${node.vlan ?? "x"}:${node.tagged ? "t" : "u"}:${ingress.id}`;
+      if (visited.has(key)) continue;
+      visited.add(key);
+      for (const { iface, end } of linkNeighbors(nextState, device.id)) {
+        if (iface.id === ingress.id) continue;
+        emit(end, { vlan: node.vlan, tagged: node.tagged });
+      }
+      continue;
+    }
+
+    // Host o router: il frame si ferma qui.
+    if (node.tagged && node.vlan != null) {
+      // Frame 802.1Q: lo riceve solo la sottointerfaccia con quel tag
+      for (const sub of device.interfaces) {
+        if (sub.parentIfaceId === ingress.id && sub.vlanTag === node.vlan) {
+          addHost(device, sub);
+        }
+      }
+    } else {
+      addHost(device, ingress);
+    }
+  }
+
+  // Riferimenti aggiornati dallo stato finale
   const refreshed = hosts.map((h) => {
     const d = getDevice(nextState, h.device.id)!;
     const iface = getIface(d, h.iface.id)!;
@@ -306,27 +278,6 @@ export function l2Flood(
   });
 
   return { hosts: refreshed, state: nextState };
-}
-
-export function formatSpanningTree(device: Device): string {
-  const lines = [
-    "VLAN0001",
-    "  Spanning tree enabled protocol ieee (NetLab semplificato)",
-    "",
-    "Interface           Role Sts Cost  Prio.Nbr Type",
-    "------------------- ---- --- ----- -------- ----------------",
-  ];
-  const ports = device.interfaces.filter(
-    (i) => !i.parentIfaceId && i.media !== "wireless",
-  );
-  for (const i of ports) {
-    const role = (i.stpRole ?? "designated").slice(0, 4).padEnd(4);
-    const sts = i.stpState === "blocking" ? "BLK" : "FWD";
-    lines.push(
-      `${i.name.padEnd(20)}${role} ${sts}  19    128.1    P2p`,
-    );
-  }
-  return lines.join("\n");
 }
 
 export function formatMacTable(device: Device): string {

@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+import { LabStateContext } from "./LabStateContext";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   connectDevices,
@@ -142,6 +144,79 @@ function modeFor(device: Device): OpenMode {
   return "panel";
 }
 
+const RUNTIME_KEYS = new Set([
+  "arpTable",
+  "macTable",
+  "stpState",
+  "stpRole",
+  "entries",
+  "clockIso",
+]);
+
+/** Configurazione del lab senza le tabelle apprese a runtime. */
+function configFingerprint(state: LabState): string {
+  return JSON.stringify(state, (key, value) =>
+    RUNTIME_KEYS.has(key) ? undefined : value,
+  );
+}
+
+type PortLabelBox = { x: number; y: number; w: number };
+
+/**
+ * Posiziona le etichette delle porte lungo ciascun cavo, vicino al proprio
+ * dispositivo, spostandole più in là quando si sovrappongono ad altre
+ * etichette o al nome del dispositivo.
+ */
+function layoutPortLabels(
+  state: LabState,
+  drag: { id: string; x: number; y: number; moved: boolean } | null,
+): Map<string, PortLabelBox> {
+  const pos = (d: Device) =>
+    drag?.id === d.id && drag.moved ? { x: drag.x, y: drag.y } : { x: d.x, y: d.y };
+  const out = new Map<string, PortLabelBox>();
+  const placed: { x: number; y: number; w: number }[] = [];
+  // ingombro di icona + nome sotto ogni dispositivo
+  for (const d of state.devices) {
+    const p = pos(d);
+    placed.push({ x: p.x, y: p.y + 30, w: Math.max(56, d.name.length * 7 + 12) });
+    const ip = d.interfaces[0]?.ip;
+    if (ip && isEndHost(d.type)) placed.push({ x: p.x, y: p.y + 46, w: ip.length * 6 + 8 });
+  }
+  const overlaps = (x: number, y: number, w: number) =>
+    placed.some((b) => Math.abs(b.x - x) < (b.w + w) / 2 + 2 && Math.abs(b.y - y) < 16);
+  for (const link of state.links) {
+    const a = state.devices.find((d) => d.id === link.aDeviceId);
+    const b = state.devices.find((d) => d.id === link.bDeviceId);
+    if (!a || !b) continue;
+    const pa = pos(a);
+    const pb = pos(b);
+    const len = Math.hypot(pb.x - pa.x, pb.y - pa.y) || 1;
+    const ux = (pb.x - pa.x) / len;
+    const uy = (pb.y - pa.y) / len;
+    for (const [end, dev, from, dir] of [
+      ["a", a, pa, 1],
+      ["b", b, pb, -1],
+    ] as const) {
+      const ifaceId = end === "a" ? link.aIfaceId : link.bIfaceId;
+      const iface = dev.interfaces.find((i) => i.id === ifaceId);
+      if (!iface) continue;
+      const w = shortPortName(iface.name).length * 5.6 + 10;
+      const maxDist = Math.max(44, len * 0.45);
+      let dist = 46;
+      let x = from.x + ux * dir * dist;
+      let y = from.y + uy * dir * dist;
+      while (overlaps(x, y, w) && dist + 12 <= maxDist) {
+        dist += 12;
+        x = from.x + ux * dir * dist;
+        y = from.y + uy * dir * dist;
+      }
+      placed.push({ x, y, w });
+      out.set(`${link.id}:${end}`, { x, y, w });
+    }
+  }
+  return out;
+}
+
 export function LabWorkspace() {
   const [state, setState] = useState<LabState>(() => createEmptyLab());
   const stateRef = useRef(state);
@@ -178,9 +253,14 @@ export function LabWorkspace() {
     y: number;
     startX: number;
     startY: number;
+    /** Posizione del puntatore nella finestra (per l’anteprima trascinata) */
+    clientX: number;
+    clientY: number;
   } | null>(null);
   const paletteDragRef = useRef(paletteDrag);
-  paletteDragRef.current = paletteDrag;
+  useEffect(() => {
+    paletteDragRef.current = paletteDrag;
+  }, [paletteDrag]);
   const skipPaletteClickRef = useRef(false);
   const [ctx, setCtx] = useState<CtxState>(null);
   const [category, setCategory] = useState<string>(PT_PALETTE[0].title);
@@ -231,8 +311,23 @@ export function LabWorkspace() {
       if (param) {
         const decoded = await decodeLabFromHash(param);
         if (decoded.state) {
-          setState(decoded.state);
-          showToast("Lab aperto dal link (snapshot)");
+          // Il lab del link sostituirebbe l’autosave: chiedi prima di perderlo
+          const keepMine =
+            hasAutosaveLab() &&
+            !window.confirm(
+              "Questo link apre un lab condiviso.\n" +
+                "Il lab che avevi salvato in automatico verrà sostituito.\n\n" +
+                "OK = apri il lab del link\nAnnulla = tieni il tuo lab",
+            );
+          if (keepMine) {
+            const saved = loadAutosave();
+            if (saved) setState(saved);
+            window.history.replaceState(null, "", window.location.pathname);
+            showToast("Tenuto il tuo lab: link condiviso ignorato");
+          } else {
+            setState(decoded.state);
+            showToast("Lab aperto dal link (snapshot)");
+          }
         } else if (decoded.error) {
           showToast(decoded.error);
         }
@@ -253,10 +348,10 @@ export function LabWorkspace() {
     })();
   }, [showToast]);
 
-  const pushHistory = useCallback(() => {
+  const pushHistory = useCallback((base?: LabState) => {
     historyRef.current = [
       ...historyRef.current.slice(-39),
-      structuredClone(stateRef.current),
+      structuredClone(base ?? stateRef.current),
     ];
     redoRef.current = [];
     setCanUndo(true);
@@ -266,6 +361,31 @@ export function LabWorkspace() {
   const applyState = useCallback(
     (next: LabState | ((prev: LabState) => LabState)) => {
       pushHistory();
+      setState(next);
+    },
+    [pushHistory],
+  );
+
+  /**
+   * Aggiornamenti dai pannelli (console, desktop, Wi‑Fi…): entrano nella
+   * cronologia di Annulla se cambiano la configurazione; le sole tabelle
+   * apprese (ARP, MAC, STP, log) no, così un ping non diventa un passo.
+   */
+  // Ultimo stato confermato dai pannelli: i pannelli scrivono anche in
+  // stateRef prima di chiamarci, quindi il confronto va fatto con questo.
+  const panelBaseRef = useRef(state);
+  useEffect(() => {
+    panelBaseRef.current = state;
+  }, [state]);
+  const panelSetState = useCallback(
+    (next: LabState) => {
+      const prev = panelBaseRef.current;
+      if (next === prev) return;
+      if (configFingerprint(next) !== configFingerprint(prev)) {
+        pushHistory(prev);
+      }
+      panelBaseRef.current = next;
+      stateRef.current = next;
       setState(next);
     },
     [pushHistory],
@@ -328,7 +448,7 @@ export function LabWorkspace() {
     setOpenDeviceId(device.id);
     setSelectedId(device.id);
     setOpenMode(modeFor(device));
-  }, []);
+  }, [setCtx, setInspectId, setOpenDeviceId, setSelectedId, setOpenMode]);
 
   function closeOpen() {
     setOpenDeviceId(null);
@@ -411,7 +531,7 @@ export function LabWorkspace() {
     setCableDraft(null);
     setCableCursor(null);
     setTool("select");
-  }, []);
+  }, [setCableDraft, setCableCursor, setTool]);
 
   const startCableFrom = useCallback(
     (deviceId: string) => {
@@ -534,6 +654,8 @@ export function LabWorkspace() {
     setDrag((d) =>
       d ? { ...d, x: rawX, y: rawY, moved } : d,
     );
+    // Primo spostamento reale: salva la posizione di partenza per Annulla
+    if (moved && !drag.moved) pushHistory();
     const prev = dragSnapRef.current;
     if (!moved || (prev && prev.x === sx && prev.y === sy)) return;
     dragSnapRef.current = { x: sx, y: sy };
@@ -775,19 +897,29 @@ export function LabWorkspace() {
     return () => window.removeEventListener("keydown", onKey);
   }, [selectedId, openDeviceId, tool, showToast, undo, redo, applyState]);
 
+  const portLabels = useMemo(() => layoutPortLabels(state, drag), [state, drag]);
+  const canvasExtent = useMemo(
+    () => ({
+      w: Math.max(0, ...state.devices.map((d) => d.x)) + 90,
+      h: Math.max(0, ...state.devices.map((d) => d.y)) + 90,
+    }),
+    [state.devices],
+  );
+
   return (
+    <LabStateContext.Provider value={state}>
     <div
       className="flex h-screen flex-col overflow-hidden bg-[var(--lab-bg)] text-[var(--lab-fg)]"
       onContextMenu={(e) => e.preventDefault()}
     >
       <header className="relative z-20 flex min-h-11 shrink-0 flex-wrap items-center gap-1.5 border-b border-[var(--lab-line)] bg-[var(--lab-panel)]/95 px-2 py-1.5 backdrop-blur sm:px-3">
-        <a
+        <Link
           href="/"
           className="flex h-8 w-8 items-center justify-center rounded bg-sky-600 font-display text-xs font-bold text-white touch-manipulation sm:h-7 sm:w-7"
           title="Home"
         >
           NL
-        </a>
+        </Link>
         <span className="mr-1 hidden font-display text-sm font-semibold tracking-tight xs:inline sm:inline">
           NetLab
         </span>
@@ -873,7 +1005,7 @@ export function LabWorkspace() {
         </ToolButton>
         </div>
 
-        <div className="ml-auto flex items-center gap-2">
+        <div className="flex w-full flex-wrap items-center gap-1 sm:ml-auto sm:w-auto sm:gap-2">
           {(cableDraft || simFrom) && (
             <span className="hidden text-[11px] text-amber-300/90 sm:inline">
               {simFrom
@@ -885,10 +1017,10 @@ export function LabWorkspace() {
                     : "Cavo… scegli porta 2"}
             </span>
           )}
-          <ToolButton active={canUndo} onClick={undo} title="Ctrl+Z">
+          <ToolButton disabled={!canUndo} onClick={undo} title="Ctrl+Z">
             Annulla
           </ToolButton>
-          <ToolButton active={canRedo} onClick={redo} title="Ctrl+Y">
+          <ToolButton disabled={!canRedo} onClick={redo} title="Ctrl+Y">
             Ripeti
           </ToolButton>
           <div className="relative">
@@ -1002,10 +1134,15 @@ export function LabWorkspace() {
         </div>
       </header>
 
-      <main className="relative min-h-0 flex-1">
+      <main className="relative min-h-0 flex-1 overflow-auto">
         <div
           ref={canvasRef}
-          className="lab-grid absolute inset-0 overflow-hidden"
+          className="lab-grid relative overflow-hidden"
+          style={{
+            // Su schermi piccoli la topologia si scorre invece di uscire dallo schermo
+            width: `max(100%, ${canvasExtent.w}px)`,
+            height: `max(100%, ${canvasExtent.h}px)`,
+          }}
           onPointerMove={(e) => {
             onCanvasPointerMove(e);
             if (cableDraft) {
@@ -1055,10 +1192,6 @@ export function LabWorkspace() {
               const status = evaluateLink(state, link, {
                 connecting: connectingIds.has(link.id),
               });
-              const ax = ax0 + (bx0 - ax0) * 0.2;
-              const ay = ay0 + (by0 - ay0) * 0.2;
-              const bx = ax0 + (bx0 - ax0) * 0.8;
-              const by = ay0 + (by0 - ay0) * 0.8;
               const tip = `${linkHealthLabel(status.health)} — ${status.reason}\n${a.name}:${aIf ? shortPortName(aIf.name) : "?"} ↔ ${b.name}:${bIf ? shortPortName(bIf.name) : "?"} (${meta.label})`;
               const dash =
                 status.health === "connecting"
@@ -1135,54 +1268,60 @@ export function LabWorkspace() {
                   >
                     <title>{tip}</title>
                   </line>
-                  {aIf && (
-                    <g style={{ pointerEvents: "none" }}>
-                      <rect
-                        x={ax - 24}
-                        y={ay - 18}
-                        width={48}
-                        height={14}
-                        rx={3}
-                        fill="#020617"
-                        fillOpacity="0.92"
-                        stroke="#334155"
-                        strokeWidth="1"
-                      />
-                      <text
-                        x={ax}
-                        y={ay - 7}
-                        textAnchor="middle"
-                        fill="#f1f5f9"
-                        style={{ fontSize: 9, fontFamily: "ui-monospace, monospace" }}
-                      >
-                        {shortPortName(aIf.name)}
-                      </text>
-                    </g>
-                  )}
-                  {bIf && (
-                    <g style={{ pointerEvents: "none" }}>
-                      <rect
-                        x={bx - 24}
-                        y={by - 18}
-                        width={48}
-                        height={14}
-                        rx={3}
-                        fill="#020617"
-                        fillOpacity="0.92"
-                        stroke="#334155"
-                        strokeWidth="1"
-                      />
-                      <text
-                        x={bx}
-                        y={by - 7}
-                        textAnchor="middle"
-                        fill="#f1f5f9"
-                        style={{ fontSize: 9, fontFamily: "ui-monospace, monospace" }}
-                      >
-                        {shortPortName(bIf.name)}
-                      </text>
-                    </g>
-                  )}
+                  {aIf && portLabels.get(`${link.id}:a`) && (() => {
+                    const L = portLabels.get(`${link.id}:a`)!;
+                    return (
+                      <g style={{ pointerEvents: "none" }}>
+                        <rect
+                          x={L.x - L.w / 2}
+                          y={L.y - 7}
+                          width={L.w}
+                          height={14}
+                          rx={3}
+                          fill="#020617"
+                          fillOpacity="0.92"
+                          stroke="#334155"
+                          strokeWidth="1"
+                        />
+                        <text
+                          x={L.x}
+                          y={L.y + 3.5}
+                          textAnchor="middle"
+                          fill="#f1f5f9"
+                          style={{ fontSize: 9, fontFamily: "ui-monospace, monospace" }}
+                        >
+                          {shortPortName(aIf.name)}
+                        </text>
+                      </g>
+                    );
+                  })()}
+                  {bIf && portLabels.get(`${link.id}:b`) && (() => {
+                    const L = portLabels.get(`${link.id}:b`)!;
+                    return (
+                      <g style={{ pointerEvents: "none" }}>
+                        <rect
+                          x={L.x - L.w / 2}
+                          y={L.y - 7}
+                          width={L.w}
+                          height={14}
+                          rx={3}
+                          fill="#020617"
+                          fillOpacity="0.92"
+                          stroke="#334155"
+                          strokeWidth="1"
+                        />
+                        <text
+                          x={L.x}
+                          y={L.y + 3.5}
+                          textAnchor="middle"
+                          fill="#f1f5f9"
+                          style={{ fontSize: 9, fontFamily: "ui-monospace, monospace" }}
+                        >
+                          {shortPortName(bIf.name)}
+                        </text>
+                      </g>
+                    );
+                  })()}
                 </g>
               );
             })}
@@ -1263,7 +1402,7 @@ export function LabWorkspace() {
               <button
                 key={device.id}
                 type="button"
-                className={`absolute flex w-[5.5rem] -translate-x-1/2 -translate-y-1/2 flex-col items-center gap-0.5 rounded-lg p-1.5 transition ${
+                className={`absolute flex w-max min-w-[5.5rem] max-w-[9rem] -translate-x-1/2 -translate-y-1/2 flex-col items-center gap-0.5 rounded-lg p-1.5 transition ${
                   printBusy
                     ? "bg-fuchsia-500/25 ring-2 ring-fuchsia-400 animate-pulse"
                     : selectedId === device.id ||
@@ -1300,7 +1439,10 @@ export function LabWorkspace() {
                     drag?.id === device.id && drag.moved ? "opacity-90" : ""
                   }`}
                 />
-                <span className="max-w-full truncate rounded bg-slate-950/75 px-1.5 py-0.5 text-[11px] font-medium text-slate-100">
+                <span
+                  title={device.name}
+                  className="max-w-full truncate rounded bg-slate-950/75 px-1.5 py-0.5 text-[11px] font-medium text-slate-100"
+                >
                   {device.name}
                 </span>
                 {device.interfaces[0]?.ip && isEndHost(device.type) && (
@@ -1388,7 +1530,7 @@ export function LabWorkspace() {
 
       <footer className="relative z-20 shrink-0 border-t border-[var(--lab-line)] bg-[var(--lab-panel)]">
         <div className="flex items-center gap-2 border-b border-slate-800/80 px-3 py-1.5">
-          <div className="flex min-w-0 flex-1 gap-1 overflow-x-auto">
+          <div className="flex min-w-0 flex-1 flex-wrap gap-1 sm:flex-nowrap sm:overflow-x-auto">
             {PT_PALETTE.map((g) => (
               <button
                 key={g.title}
@@ -1438,7 +1580,15 @@ export function LabWorkspace() {
                 const rect = canvasRef.current?.getBoundingClientRect();
                 const x = rect ? e.clientX - rect.left : e.clientX;
                 const y = rect ? e.clientY - rect.top : e.clientY;
-                const next = { type, x, y, startX: x, startY: y };
+                const next = {
+                  type,
+                  x,
+                  y,
+                  startX: x,
+                  startY: y,
+                  clientX: e.clientX,
+                  clientY: e.clientY,
+                };
                 paletteDragRef.current = next;
                 setPaletteDrag(next);
                 (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
@@ -1452,6 +1602,8 @@ export function LabWorkspace() {
                   ...drag,
                   x: e.clientX - rect.left,
                   y: e.clientY - rect.top,
+                  clientX: e.clientX,
+                  clientY: e.clientY,
                 };
                 paletteDragRef.current = next;
                 setPaletteDrag(next);
@@ -1505,14 +1657,7 @@ export function LabWorkspace() {
       {paletteDrag && (
         <div
           className="pointer-events-none fixed z-[80] -translate-x-1/2 -translate-y-1/2 opacity-90"
-          style={{
-            left:
-              (canvasRef.current?.getBoundingClientRect().left ?? 0) +
-              paletteDrag.x,
-            top:
-              (canvasRef.current?.getBoundingClientRect().top ?? 0) +
-              paletteDrag.y,
-          }}
+          style={{ left: paletteDrag.clientX, top: paletteDrag.clientY }}
         >
           <div className="flex flex-col items-center rounded-md border border-sky-400 bg-slate-200/95 px-2 py-1 shadow-xl">
             <DeviceIcon type={paletteDrag.type} className="h-10 w-10" />
@@ -1536,7 +1681,7 @@ export function LabWorkspace() {
         <WindowsDesktop
           device={openDevice}
           stateRef={stateRef}
-          setState={setState}
+          setState={panelSetState}
           onClose={closeOpen}
           onSimulate={(packets, message) => {
             if (packets.length) setSimPackets(packets);
@@ -1548,7 +1693,7 @@ export function LabWorkspace() {
         <RouterConsole
           device={openDevice}
           stateRef={stateRef}
-          setState={setState}
+          setState={panelSetState}
           onClose={closeOpen}
         />
       )}
@@ -1556,7 +1701,7 @@ export function LabWorkspace() {
         <SwitchPanel
           device={openDevice}
           stateRef={stateRef}
-          setState={setState}
+          setState={panelSetState}
           onClose={closeOpen}
         />
       )}
@@ -1566,7 +1711,7 @@ export function LabWorkspace() {
           device={openDevice}
           state={state}
           stateRef={stateRef}
-          setState={setState}
+          setState={panelSetState}
           onClose={closeOpen}
         />
       )}
@@ -1576,7 +1721,7 @@ export function LabWorkspace() {
           device={openDevice}
           state={state}
           stateRef={stateRef}
-          setState={setState}
+          setState={panelSetState}
           onClose={closeOpen}
         />
       )}
@@ -1586,7 +1731,7 @@ export function LabWorkspace() {
           device={openDevice}
           state={state}
           stateRef={stateRef}
-          setState={setState}
+          setState={panelSetState}
           onClose={closeOpen}
         />
       )}
@@ -1594,7 +1739,7 @@ export function LabWorkspace() {
         <PrinterPanel
           device={openDevice}
           stateRef={stateRef}
-          setState={setState}
+          setState={panelSetState}
           onClose={closeOpen}
         />
       )}
@@ -1673,6 +1818,7 @@ export function LabWorkspace() {
         />
       )}
     </div>
+    </LabStateContext.Provider>
   );
 }
 
@@ -1680,11 +1826,13 @@ function ToolButton({
   children,
   onClick,
   active,
+  disabled,
   title,
 }: {
   children: React.ReactNode;
   onClick: () => void;
   active?: boolean;
+  disabled?: boolean;
   title?: string;
 }) {
   return (
@@ -1692,10 +1840,13 @@ function ToolButton({
       type="button"
       title={title}
       onClick={onClick}
+      disabled={disabled}
       className={`rounded px-2.5 py-1.5 text-xs font-medium transition touch-manipulation sm:py-1 ${
         active
           ? "bg-sky-600 text-white"
-          : "text-slate-300 hover:bg-slate-800 hover:text-white"
+          : disabled
+            ? "cursor-default text-slate-600"
+            : "text-slate-300 hover:bg-slate-800 hover:text-white"
       }`}
     >
       {children}

@@ -115,22 +115,26 @@ export type InterfaceConfig = {
   /** Named ACL applied inbound / outbound (standard numbered ACL) */
   aclIn: number | null;
   aclOut: number | null;
+  /** Router: inoltro DHCP verso questo server (ip helper-address) */
+  helperAddress?: string | null;
   /** STP: porta bloccata non inoltra frame */
   stpState?: "forwarding" | "blocking";
   stpRole?: "root" | "designated" | "alternate" | "disabled";
 };
 
 export type AclAction = "permit" | "deny";
-export type AclProtocol = "ip" | "icmp" | "any";
+export type AclProtocol = "ip" | "icmp" | "tcp" | "udp" | "any";
 
 /** Cisco-like numbered ACL entry (standard/extended simplified) */
 export type AclAce = {
   sequence: number;
   action: AclAction;
   protocol: AclProtocol;
-  /** "any" or host IP */
+  /** "any", "host A.B.C.D", "A.B.C.D W.W.W.W" (wildcard) o IP singolo */
   source: string;
   destination: string;
+  /** Porta destinazione (eq N) per tcp/udp */
+  dstPort?: number;
 };
 
 export type AccessList = {
@@ -217,6 +221,10 @@ export type Device = {
   arpTable?: ArpEntry[];
   /** Router static routes (ip route) */
   routes?: StaticRoute[];
+  /** Switch multilayer: routing tra SVI attivo ("ip routing") */
+  ipRouting?: boolean;
+  /** Priorità bridge STP (default 32768) */
+  stpPriority?: number;
   /** Orologio sincronizzato via NTP (ISO) */
   clockIso?: string;
   /** Ultimo server NTP usato */
@@ -480,6 +488,8 @@ export type PingResult = {
   hops: PingHop[];
   rttMs: number;
   message: string;
+  /** Motivo del fallimento in una riga (per console e simulazione) */
+  reason?: string;
   packets: { sent: number; received: number; lost: number };
 };
 

@@ -21,6 +21,7 @@ import {
 import { isManagedSwitch, type Device, type LabState } from "@/lib/network/types";
 import { PhysicalPanel } from "./PhysicalPanel";
 import { Terminal } from "./Terminal";
+import { useLabState } from "./LabStateContext";
 
 export function SwitchPanel({
   device,
@@ -33,8 +34,8 @@ export function SwitchPanel({
   setState: (next: LabState) => void;
   onClose: () => void;
 }) {
-  const live =
-    stateRef.current.devices.find((d) => d.id === device.id) ?? device;
+  const lab = useLabState();
+  const live = lab.devices.find((d) => d.id === device.id) ?? device;
   const managed = isManagedSwitch(live.type);
   const [tab, setTab] = useState<"ports" | "ip" | "cli" | "physical">("ports");
   const [cli, setCli] = useState<RouterCliState>(() =>
@@ -150,7 +151,7 @@ export function SwitchPanel({
                     : `VLAN ${iface.accessVlan}`;
                 const peer = (() => {
                   if (!iface.connectedLinkId) return null;
-                  const link = stateRef.current.links.find(
+                  const link = lab.links.find(
                     (l) => l.id === iface.connectedLinkId,
                   );
                   if (!link) return null;
@@ -162,7 +163,7 @@ export function SwitchPanel({
                     link.aDeviceId === live.id
                       ? link.bIfaceId
                       : link.aIfaceId;
-                  const other = stateRef.current.devices.find(
+                  const other = lab.devices.find(
                     (d) => d.id === otherId,
                   );
                   const oIf = other?.interfaces.find((i) => i.id === otherIfId);
@@ -341,7 +342,7 @@ function SwitchIpForm({
   stateRef: React.MutableRefObject<LabState>;
   setState: (next: LabState) => void;
 }) {
-  const device = stateRef.current.devices.find((d) => d.id === deviceId);
+  const device = useLabState().devices.find((d) => d.id === deviceId);
   const svi = device?.interfaces.find((i) => i.sviVlan === 1);
   const [ip, setIp] = useState(svi?.ip ?? "");
   const [mask, setMask] = useState(svi?.mask ?? "255.255.255.0");

@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { fetchMail, markMailRead, sendMail } from "@/lib/network/email";
 import type { Device, LabState, MailMessage } from "@/lib/network/types";
+import { useLabState } from "./LabStateContext";
 
 export function EmailClient({
   device,
@@ -15,10 +16,11 @@ export function EmailClient({
   setState: (next: LabState) => void;
   onClose: () => void;
 }) {
+  const lab = useLabState();
   const servers = useMemo(
     () =>
-      stateRef.current.devices.filter((d) => d.services?.email?.enabled),
-    [stateRef],
+      lab.devices.filter((d) => d.services?.email?.enabled),
+    [lab],
   );
   const defaultServer = servers[0];
   const domain = defaultServer?.services?.email?.domain ?? "lab.local";

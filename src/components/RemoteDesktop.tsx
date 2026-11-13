@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { runPing } from "@/lib/network/engine";
 import type { Device, DeviceKind, LabState } from "@/lib/network/types";
+import { useLabState } from "./LabStateContext";
 
 function hasWindowsDesktop(type: DeviceKind): boolean {
   return (
@@ -35,8 +36,9 @@ export function RemoteDesktop({
   onClose: () => void;
   onOpenRemote: (target: Device) => void;
 }) {
+  const lab = useLabState();
   const peers = useMemo((): PeerRow[] => {
-    return stateRef.current.devices
+    return lab.devices
       .filter((d) => d.id !== device.id && hasWindowsDesktop(d.type))
       .map((d) => ({
         device: d,
@@ -49,7 +51,7 @@ export function RemoteDesktop({
               : "PC",
       }))
       .sort((a, b) => a.device.name.localeCompare(b.device.name));
-  }, [device.id, stateRef]);
+  }, [device.id, lab]);
 
   const [selectedId, setSelectedId] = useState<string | null>(
     () => peers.find((p) => p.ip && p.device.powered)?.device.id ?? null,
@@ -94,7 +96,7 @@ export function RemoteDesktop({
       if (!result.ok) {
         setPhase("error");
         setStatus(
-          `Non raggiungibile: ${result.message.split("\n")[0]}. Controlla cavi, VLAN e IP.`,
+          `Non raggiungibile: ${(result.reason ?? result.message.split("\n")[0])}. Controlla cavi, VLAN e IP.`,
         );
         return;
       }

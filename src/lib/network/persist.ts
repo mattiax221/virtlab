@@ -1,3 +1,4 @@
+import { reserveIdsFrom } from "./engine";
 import type { LabState } from "./types";
 
 const STORAGE_KEY = "netlab-autosave";
@@ -12,12 +13,19 @@ export function parseLabJson(raw: string): { state?: LabState; error?: string } 
     if (!data || !Array.isArray(data.devices) || !Array.isArray(data.links)) {
       return { error: "JSON non valido: manca devices/links." };
     }
-    return {
-      state: {
-        devices: data.devices,
-        links: data.links,
-      },
-    };
+    const malformed = data.devices.some(
+      (d) =>
+        !d ||
+        typeof d.id !== "string" ||
+        typeof d.type !== "string" ||
+        !Array.isArray(d.interfaces),
+    );
+    if (malformed) {
+      return { error: "JSON non valido: dispositivi incompleti." };
+    }
+    const state: LabState = { devices: data.devices, links: data.links };
+    reserveIdsFrom(state);
+    return { state };
   } catch {
     return { error: "JSON non leggibile." };
   }

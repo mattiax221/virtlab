@@ -375,6 +375,20 @@ export const releases: ChangelogEntry[] = [
     detail:
       "Login, registrazione e reset password. Ospite senza account. Tabella profiles e pagina /admin (ruoli, presenza, disattiva, elimina). Nessuna chiave in pagina.",
   },
+  {
+    sha: "7c110f2",
+    date: "2026-11-13",
+    title: "Rete più realistica: andata e ritorno, ACL, STP",
+    detail:
+      "Il ping riesce solo se torna anche la risposta (rotte di ritorno, gateway). I router non inoltrano più i broadcast: niente DHCP oltre il router senza ip helper-address. ACL con wildcard, standard 1-99 e tcp/udp eq porta, controllate su ogni router. STP 802.1D con root bridge e porte bloccate anche negli anelli. Switch multilayer con ip routing. Router con interfacce in shutdown di default. NAT sui router domestici. Id non più duplicati dopo un ripristino; il link condiviso chiede prima di sostituire il lab salvato.",
+  },
+  {
+    sha: "7e0edeb",
+    date: "2026-11-13",
+    title: "Interfaccia: etichette, telefono, Annulla",
+    detail:
+      "Etichette delle porte senza sovrapposizioni e nomi interi. Su telefono la barra va a capo e la topologia si scorre. Le modifiche da console e pannelli e gli spostamenti si annullano con Annulla. Pannelli sempre allineati allo stato del lab. Comandi end e do come su IOS.",
+  },
 ];
 
 /** Roadmap NetLab — Packet Tracer didattico nel browser. */

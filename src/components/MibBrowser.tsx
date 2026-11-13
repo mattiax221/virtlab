@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { runPing } from "@/lib/network/engine";
 import type { Device, LabState } from "@/lib/network/types";
+import { useLabState } from "./LabStateContext";
 
 type MibRow = { oid: string; name: string; value: string };
 
@@ -65,14 +66,15 @@ export function MibBrowser({
   setState: (next: LabState) => void;
   onClose: () => void;
 }) {
+  const lab = useLabState();
   const snmpPeers = useMemo(() => {
-    return stateRef.current.devices
+    return lab.devices
       .filter((d) => d.id !== device.id)
       .map((d) => ({
         device: d,
         ip: d.interfaces.find((i) => i.ip && !i.parentIfaceId)?.ip ?? null,
       }));
-  }, [device.id, stateRef]);
+  }, [device.id, lab]);
 
   const [host, setHost] = useState(
     () => snmpPeers.find((p) => p.ip)?.ip ?? "192.168.1.1",
@@ -94,7 +96,7 @@ export function MibBrowser({
     setState(state);
     if (!result.ok) {
       setRows([]);
-      setStatus(`SNMP timeout — ${result.message.split("\n")[0]}`);
+      setStatus(`SNMP timeout — ${(result.reason ?? result.message.split("\n")[0])}`);
       return;
     }
     const target = state.devices.find((d) =>

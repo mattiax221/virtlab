@@ -12,6 +12,7 @@ import {
 import type { Device, LabState } from "@/lib/network/types";
 import { PhysicalPanel } from "./PhysicalPanel";
 import { Terminal } from "./Terminal";
+import { useLabState } from "./LabStateContext";
 
 export function RouterConsole({
   device,
@@ -24,8 +25,8 @@ export function RouterConsole({
   setState: (next: LabState) => void;
   onClose: () => void;
 }) {
-  const live =
-    stateRef.current.devices.find((d) => d.id === device.id) ?? device;
+  const lab = useLabState();
+  const live = lab.devices.find((d) => d.id === device.id) ?? device;
   const [tab, setTab] = useState<"cli" | "physical">("cli");
   const [cli, setCli] = useState<RouterCliState>(() =>
     initialRouterCli(live.name),

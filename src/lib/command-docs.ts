@@ -58,8 +58,8 @@ export const COMMAND_SECTIONS: CmdSection[] = [
       },
       {
         cmd: "ipconfig /renew",
-        does: "Richiede lease DHCP al Server-PT (o gateway DHCP).",
-        doesNot: "Non parla con DHCP relay reali; un solo pool alla volta (semplificato).",
+        does: "Richiede lease DHCP al Server-PT della stessa LAN, o tramite ip helper-address del router.",
+        doesNot: "Niente opzioni DHCP avanzate né tempi di lease reali.",
       },
       {
         cmd: "ipconfig /release",
@@ -69,7 +69,7 @@ export const COMMAND_SECTIONS: CmdSection[] = [
       {
         cmd: "ping",
         synopsis: "ping <ip|nome>",
-        does: "ICMP simulato con percorso L2/L3, ARP learning, DNS se nome.",
+        does: "ICMP simulato andata e ritorno: VLAN, ARP, rotte, ACL. Riesce solo se anche la risposta torna.",
         doesNot: "Niente -t, -n, -l; RTT è finto; non MTU discovery.",
         example: "ping 192.168.1.1\nping server.lab",
       },
@@ -407,8 +407,8 @@ export const COMMAND_SECTIONS: CmdSection[] = [
       },
       {
         cmd: "show access-lists",
-        does: "Elenca ACL definite.",
-        doesNot: "Hit count spesso non incrementati in UI.",
+        does: "Elenca ACL standard ed estese con wildcard.",
+        doesNot: "Niente hit count; niente ACL con nome.",
       },
       {
         cmd: "ping",
@@ -475,8 +475,8 @@ export const COMMAND_SECTIONS: CmdSection[] = [
       },
       {
         cmd: "show spanning-tree",
-        does: "Ruoli/stati STP semplificati (FWD/BLK).",
-        doesNot: "Niente RSTP per-VLAN completo (roadmap).",
+        does: "Root bridge, root port, porte designate e bloccate (802.1D), anche su anelli di più switch.",
+        doesNot: "Un’unica istanza per tutte le VLAN; niente RSTP.",
       },
       {
         cmd: "show interfaces status / trunk",
@@ -485,8 +485,8 @@ export const COMMAND_SECTIONS: CmdSection[] = [
       },
       {
         cmd: "show ip interface brief",
-        does: "Utile anche sullo switch (SVI limitate se presenti).",
-        doesNot: "Routing L3 multilayer incompleto (visione).",
+        does: "Utile anche sullo switch; sul multilayer con ip routing le SVI instradano tra VLAN.",
+        doesNot: "Niente routing dinamico (OSPF/EIGRP).",
       },
     ],
   },
@@ -505,7 +505,7 @@ export const COMMAND_SECTIONS: CmdSection[] = [
       {
         cmd: "DHCP pools",
         does: "Pool Name, gateway, DNS, start IP, mask, max users; serverPool locked.",
-        doesNot: "Niente opzioni DHCP avanzate / relay.",
+        doesNot: "Niente opzioni DHCP avanzate. Per altre reti: un pool per subnet + ip helper-address sul router.",
       },
       {
         cmd: "DNS",

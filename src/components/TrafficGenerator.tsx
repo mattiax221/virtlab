@@ -10,6 +10,7 @@ import {
   type SimPacket,
 } from "@/lib/network/simulation";
 import type { Device, LabState } from "@/lib/network/types";
+import { useLabState } from "./LabStateContext";
 
 type Proto = "ICMP" | "HTTP" | "DNS" | "DHCP" | "PRINT";
 
@@ -30,17 +31,17 @@ export function TrafficGenerator({
   onClose: () => void;
   onGenerate?: (packets: SimPacket[], message: string) => void;
 }) {
-  const live =
-    stateRef.current.devices.find((d) => d.id === device.id) ?? device;
+  const lab = useLabState();
+  const live = lab.devices.find((d) => d.id === device.id) ?? device;
   const peers = useMemo(() => {
-    return stateRef.current.devices
+    return lab.devices
       .filter((d) => d.id !== live.id)
       .map((d) => {
         const ip =
           d.interfaces.find((i) => i.ip && !i.parentIfaceId)?.ip ?? null;
         return { id: d.id, name: d.name, ip };
       });
-  }, [live.id, stateRef]);
+  }, [live.id, lab]);
 
   const [proto, setProto] = useState<Proto>("ICMP");
   const [dest, setDest] = useState(
