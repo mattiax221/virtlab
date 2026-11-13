@@ -44,7 +44,7 @@ export function PortPicker({
   peerMedia?: InterfaceConfig["media"] | null;
   cableHint?: string;
 }) {
-  const ports = [...device.interfaces.filter((i) => !i.parentIfaceId)].sort(
+  const ports = [...device.interfaces.filter((i) => !i.parentIfaceId && !i.sviVlan)].sort(
     comparePorts,
   );
   const free = ports.filter((i) => !i.connectedLinkId && i.enabled);

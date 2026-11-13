@@ -488,8 +488,9 @@ export function interfacesFromModules(
     existing?.filter(
       (i) => i.parentIfaceId && parentIds.has(i.parentIfaceId),
     ) ?? [];
+  const svis = existing?.filter((i) => i.sviVlan) ?? [];
 
-  return [...physical, ...subs];
+  return [...physical, ...subs, ...svis];
 }
 
 export function isModuleRemovable(mod: InstalledModule, type: DeviceKind): boolean {

@@ -1,6 +1,7 @@
 import { formatArpTable, learnArp } from "./arp";
 import {
   createSubinterface,
+  ensureSvi,
   getDevice,
   runPing,
   updateDevice,
@@ -14,6 +15,7 @@ import {
   formatSpanningTree,
   formatVlanBrief,
   l2Flood,
+  sviHasMemberLink,
 } from "./l2";
 import {
   fetchHttp,
@@ -1380,6 +1382,22 @@ export function runRouterCommand(
       });
       return { output: "" };
     }
+    const vlanCmd = name.match(/^vlan\s*(\d+)$/i);
+    if (vlanCmd) {
+      const vlanId = Number(vlanCmd[1]);
+      const created = ensureSvi(ctx.state, ctx.deviceId, vlanId);
+      if (created.error || !created.iface) {
+        return { output: created.error ?? "% Failed" };
+      }
+      ctx.setState(created.state);
+      setCli({
+        ...cli,
+        mode: "config-if",
+        ifaceId: created.iface.id,
+        vlanId: null,
+      });
+      return { output: "" };
+    }
     const iface = findIfaceByName(device, name);
     if (!iface) {
       return {
@@ -1592,6 +1610,32 @@ export function runRouterCommand(
   }
 
   if (
+    (lower.startsWith("ip default-gateway ") || lower.startsWith("ip default gateway ")) &&
+    cli.mode === "config"
+  ) {
+    const gw = parts[parts.length - 1];
+    if (!gw || !isValidIp(gw)) return { output: "% Invalid IP address" };
+    const svi = ensureSvi(ctx.state, ctx.deviceId, 1);
+    if (svi.error || !svi.iface) return { output: svi.error ?? "% No VLAN1" };
+    ctx.setState(
+      updateIface(svi.state, ctx.deviceId, svi.iface.id, { gateway: gw }),
+    );
+    return { output: "" };
+  }
+
+  if (
+    (lower === "no ip default-gateway" || lower === "no ip default gateway") &&
+    cli.mode === "config"
+  ) {
+    const svi = ensureSvi(ctx.state, ctx.deviceId, 1);
+    if (svi.error || !svi.iface) return { output: "" };
+    ctx.setState(
+      updateIface(svi.state, ctx.deviceId, svi.iface.id, { gateway: null }),
+    );
+    return { output: "" };
+  }
+
+  if (
     lower.startsWith("clock rate ") &&
     cli.mode === "config-if" &&
     cli.ifaceId
@@ -1739,7 +1783,10 @@ export function runRouterCommand(
       "Interface                  IP-Address      OK? Method Status                Protocol";
     const rows = device.interfaces.map((i) => {
       const status = i.enabled ? "up" : "administratively down";
-      const proto = i.enabled && i.connectedLinkId ? "up" : "down";
+      const linkUp = i.sviVlan
+        ? sviHasMemberLink(device, i.sviVlan)
+        : Boolean(i.connectedLinkId);
+      const proto = i.enabled && linkUp ? "up" : "down";
       return `${i.name.padEnd(27)}${(i.ip ?? "unassigned").padEnd(16)}YES manual ${status.padEnd(22)}${proto}`;
     });
     return { output: [header, ...rows].join("\n") };

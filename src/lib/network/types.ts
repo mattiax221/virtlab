@@ -104,6 +104,8 @@ export type InterfaceConfig = {
   parentIfaceId: string | null;
   /** encapsulation dot1Q VLAN (subinterface) */
   vlanTag: number | null;
+  /** Switch virtual interface (interface VlanN). Absent on physical ports. */
+  sviVlan?: number | null;
   /** Obtained address via DHCP */
   dhcpClient: boolean;
   /** Preferred DNS (from DHCP or static) */

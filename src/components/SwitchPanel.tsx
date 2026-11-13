@@ -1,6 +1,9 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { ensureSvi, updateIface } from "@/lib/network/engine";
+import { isValidIp, parseMask } from "@/lib/network/ip";
+import { sviHasMemberLink } from "@/lib/network/l2";
 import { iosCompletions } from "@/lib/cli-complete";
 import {
   initialRouterCli,
@@ -33,14 +36,14 @@ export function SwitchPanel({
   const live =
     stateRef.current.devices.find((d) => d.id === device.id) ?? device;
   const managed = isManagedSwitch(live.type);
-  const [tab, setTab] = useState<"ports" | "cli" | "physical">("ports");
+  const [tab, setTab] = useState<"ports" | "ip" | "cli" | "physical">("ports");
   const [cli, setCli] = useState<RouterCliState>(() =>
     initialRouterCli(live.name),
   );
 
   const ports = useMemo(
     () =>
-      [...live.interfaces.filter((i) => !i.parentIfaceId)].sort(comparePorts),
+      [...live.interfaces.filter((i) => !i.parentIfaceId && !i.sviVlan)].sort(comparePorts),
     [live],
   );
 
@@ -80,6 +83,11 @@ export function SwitchPanel({
             Porte / LED
           </TabBtn>
           {managed && (
+            <TabBtn active={tab === "ip"} onClick={() => setTab("ip")}>
+              IP
+            </TabBtn>
+          )}
+          {managed && (
             <TabBtn active={tab === "cli"} onClick={() => setTab("cli")}>
               Console CLI
             </TabBtn>
@@ -92,6 +100,18 @@ export function SwitchPanel({
         {tab === "physical" ? (
           <PhysicalPanel
             device={device}
+            stateRef={stateRef}
+            setState={setState}
+          />
+        ) : tab === "ip" && managed ? (
+          <SwitchIpForm
+            key={
+              (live.interfaces.find((i) => i.sviVlan === 1)?.ip ?? "") +
+              (live.interfaces.find((i) => i.sviVlan === 1)?.mask ?? "") +
+              (live.interfaces.find((i) => i.sviVlan === 1)?.gateway ?? "") +
+              String(live.interfaces.find((i) => i.sviVlan === 1)?.enabled)
+            }
+            deviceId={live.id}
             stateRef={stateRef}
             setState={setState}
           />
@@ -309,6 +329,113 @@ function TabBtn({
     >
       {children}
     </button>
+  );
+}
+
+function SwitchIpForm({
+  deviceId,
+  stateRef,
+  setState,
+}: {
+  deviceId: string;
+  stateRef: React.MutableRefObject<LabState>;
+  setState: (next: LabState) => void;
+}) {
+  const device = stateRef.current.devices.find((d) => d.id === deviceId);
+  const svi = device?.interfaces.find((i) => i.sviVlan === 1);
+  const [ip, setIp] = useState(svi?.ip ?? "");
+  const [mask, setMask] = useState(svi?.mask ?? "255.255.255.0");
+  const [gw, setGw] = useState(svi?.gateway ?? "");
+  const [enabled, setEnabled] = useState(svi?.enabled !== false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const up = device && svi?.sviVlan ? sviHasMemberLink(device, svi.sviVlan) : false;
+
+  function apply() {
+    let state = ensureSvi(stateRef.current, deviceId, 1).state;
+    const vlan = state.devices
+      .find((d) => d.id === deviceId)
+      ?.interfaces.find((i) => i.sviVlan === 1);
+    if (!vlan) {
+      setMsg("Interfaccia VLAN 1 non disponibile.");
+      return;
+    }
+    if (ip.trim() && !isValidIp(ip.trim())) {
+      setMsg("Indirizzo IP non valido.");
+      return;
+    }
+    if (ip.trim() && parseMask(mask) === null) {
+      setMsg("Subnet mask non valida.");
+      return;
+    }
+    if (gw.trim() && !isValidIp(gw.trim())) {
+      setMsg("Gateway non valido.");
+      return;
+    }
+    state = updateIface(state, deviceId, vlan.id, {
+      ip: ip.trim() || null,
+      mask: ip.trim() ? mask.trim() : null,
+      gateway: gw.trim() || null,
+      enabled,
+    });
+    stateRef.current = state;
+    setState(state);
+    setMsg("IP di gestione VLAN 1 applicato.");
+  }
+
+  return (
+    <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4 text-sm">
+      <p className="text-[11px] leading-relaxed text-slate-500">
+        Indirizzo di gestione sulla SVI VLAN 1. Lo switch risponde al ping solo
+        se l&apos;interfaccia è attiva e almeno una porta di quella VLAN è up.
+      </p>
+      <label className="flex items-center gap-2 text-slate-300">
+        <input
+          type="checkbox"
+          checked={enabled}
+          onChange={(e) => setEnabled(e.target.checked)}
+        />
+        VLAN 1 attiva (no shutdown)
+        <span className={up && enabled ? "text-emerald-300" : "text-slate-500"}>
+          · protocol {up && enabled ? "up" : "down"}
+        </span>
+      </label>
+      <label className="block space-y-1">
+        <span className="text-[11px] text-slate-400">Indirizzo IP</span>
+        <input
+          value={ip}
+          onChange={(e) => setIp(e.target.value)}
+          placeholder="192.168.1.2"
+          className="w-full max-w-xs rounded border border-slate-600 bg-slate-950 px-2 py-1.5 font-mono text-slate-100 outline-none focus:border-emerald-500"
+        />
+      </label>
+      <label className="block space-y-1">
+        <span className="text-[11px] text-slate-400">Subnet mask</span>
+        <input
+          value={mask}
+          onChange={(e) => setMask(e.target.value)}
+          className="w-full max-w-xs rounded border border-slate-600 bg-slate-950 px-2 py-1.5 font-mono text-slate-100 outline-none focus:border-emerald-500"
+        />
+      </label>
+      <label className="block space-y-1">
+        <span className="text-[11px] text-slate-400">Gateway predefinito</span>
+        <input
+          value={gw}
+          onChange={(e) => setGw(e.target.value)}
+          placeholder="192.168.1.1"
+          className="w-full max-w-xs rounded border border-slate-600 bg-slate-950 px-2 py-1.5 font-mono text-slate-100 outline-none focus:border-emerald-500"
+        />
+      </label>
+      <button
+        type="button"
+        onClick={apply}
+        className="rounded bg-emerald-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-600"
+      >
+        Applica
+      </button>
+      {msg && (
+        <p className="text-[11px] text-emerald-200">{msg}</p>
+      )}
+    </div>
   );
 }
 

@@ -31,6 +31,19 @@ function otherEnd(
   return { device, iface };
 }
 
+/** SVI protocol up: almeno una porta della VLAN è link-up. */
+export function sviHasMemberLink(device: Device, vlan: number): boolean {
+  return device.interfaces.some((p) => {
+    if (p.sviVlan || p.parentIfaceId) return false;
+    if (!p.enabled || !p.connectedLinkId || p.stpState === "blocking") return false;
+    if (p.mode === "trunk") {
+      if (p.allowedVlans === "all") return true;
+      return p.allowedVlans.includes(vlan);
+    }
+    return p.accessVlan === vlan;
+  });
+}
+
 export function linkNeighbors(
   state: LabState,
   deviceId: string,
@@ -145,6 +158,16 @@ export function l2Flood(
         opts.sourceMac,
         node.vlan,
       );
+    }
+
+    if (isManagedSwitch(device.type) && node.vlan != null) {
+      for (const iface of device.interfaces) {
+        if (iface.sviVlan !== node.vlan || !iface.enabled || !iface.ip) continue;
+        if (!sviHasMemberLink(device, iface.sviVlan)) continue;
+        if (seenHostIf.has(iface.id)) continue;
+        seenHostIf.add(iface.id);
+        hosts.push({ device, iface });
+      }
     }
 
     if (!isL2Bridge(device.type)) {

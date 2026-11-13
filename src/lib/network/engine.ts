@@ -3,7 +3,7 @@ import { learnArp } from "./arp";
 import { inferCable, type CableKind } from "./catalog";
 import { getDevice, getIface } from "./engine-helpers";
 import { hostFirewallBlocks } from "./hostFirewall";
-import { formatIp, isValidIp, parseIp, parseMask, sameSubnet } from "./ip";
+import { formatIp, isValidIp, parseIp, parseMask, randomMac, sameSubnet } from "./ip";
 import { l2Flood } from "./l2";
 import {
   availableModulesFor,
@@ -68,6 +68,7 @@ export function createDevice(
   if (isManagedSwitch(type)) {
     device.vlans = defaultVlans().filter((v) => v.id === 1);
     device.macTable = [];
+    device.interfaces.push(makeSvi(id, 1));
   }
   if (isWifiCapable(type)) {
     device.wifi = {
@@ -253,6 +254,68 @@ export function removeModule(
     ),
   };
   return { state: next };
+}
+
+function makeSvi(deviceId: string, vlanId: number): InterfaceConfig {
+  return {
+    id: uid("if"),
+    name: `Vlan${vlanId}`,
+    ip: null,
+    mask: null,
+    gateway: null,
+    mac: randomMac(`${deviceId}-vlan${vlanId}`),
+    connectedLinkId: null,
+    enabled: true,
+    mode: "access",
+    accessVlan: vlanId,
+    nativeVlan: vlanId,
+    allowedVlans: "all",
+    media: "ethernet",
+    moduleId: null,
+    parentIfaceId: null,
+    vlanTag: vlanId,
+    sviVlan: vlanId,
+    dhcpClient: false,
+    dnsServers: [],
+    clockRate: null,
+    aclIn: null,
+    aclOut: null,
+  };
+}
+
+/** interface VlanN — crea la SVI se non c'è (gli switch nuovi hanno già Vlan1). */
+export function ensureSvi(
+  state: LabState,
+  deviceId: string,
+  vlanId: number,
+): { state: LabState; iface?: InterfaceConfig; error?: string } {
+  const device = getDevice(state, deviceId);
+  if (!device) return { state, error: "Dispositivo non trovato." };
+  if (!isManagedSwitch(device.type)) {
+    return { state, error: "SVI solo sugli switch." };
+  }
+  if (!Number.isInteger(vlanId) || vlanId < 1 || vlanId > 4094) {
+    return { state, error: "VLAN non valida." };
+  }
+  const existing = device.interfaces.find((i) => i.sviVlan === vlanId);
+  if (existing) return { state, iface: existing };
+  const iface = makeSvi(device.id, vlanId);
+  const vlans = [...(device.vlans ?? [{ id: 1, name: "default" }])];
+  if (!vlans.some((v) => v.id === vlanId)) {
+    vlans.push({ id: vlanId, name: vlanId === 1 ? "default" : `VLAN${vlanId}` });
+    vlans.sort((a, b) => a.id - b.id);
+  }
+  return {
+    state: {
+      ...state,
+      devices: state.devices.map((d) =>
+        d.id === deviceId
+          ? { ...d, vlans, interfaces: [...d.interfaces, iface] }
+          : d,
+      ),
+    },
+    iface,
+  };
 }
 
 export function createSubinterface(
