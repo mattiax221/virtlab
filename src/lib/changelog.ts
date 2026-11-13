@@ -383,7 +383,7 @@ export const releases: ChangelogEntry[] = [
       "Il ping riesce solo se torna anche la risposta (rotte di ritorno, gateway). I router non inoltrano più i broadcast: niente DHCP oltre il router senza ip helper-address. ACL con wildcard, standard 1-99 e tcp/udp eq porta, controllate su ogni router. STP 802.1D con root bridge e porte bloccate anche negli anelli. Switch multilayer con ip routing. Router con interfacce in shutdown di default. NAT sui router domestici. Id non più duplicati dopo un ripristino; il link condiviso chiede prima di sostituire il lab salvato.",
   },
   {
-    sha: "PENDING",
+    sha: "7e0edeb",
     date: "2026-11-13",
     title: "Interfaccia: etichette, telefono, Annulla",
     detail:
