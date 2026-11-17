@@ -403,6 +403,13 @@ export const releases: ChangelogEntry[] = [
     detail:
       "Se manca ancora la migrazione classi/consegne, l’amministrazione resta usabile sull’elenco utenti (con banner). Nella scheda Utenti compare quanti laboratori online ha salvato ciascuno.",
   },
+  {
+    sha: "PENDING",
+    date: "2026-11-17",
+    title: "Bacheca bug/idee e annotazioni canvas (testo e cerchi VLAN)",
+    detail:
+      "Nuova pagina Bug e idee per segnalare problemi o proporre modifiche (bacheca condivisa con Supabase, altrimenti sul browser). Nel laboratorio: strumenti Testo e Cerchio per etichette e zone colorate (VLAN), con modifica colore/raggio e salvataggio nel lab.",
+  },
 ];
 
 /** Roadmap NetLab — Packet Tracer didattico nel browser. */

@@ -24,6 +24,8 @@ import {
   isL3Device,
   isManagedSwitch,
   isWifiCapable,
+  type Annotation,
+  type AnnotationKind,
   type Device,
   type DeviceKind,
   type InstalledModule,
@@ -61,7 +63,68 @@ export function reserveIdsFrom(state: LabState): void {
     for (const i of d.interfaces) bump(i.id);
   }
   for (const l of state.links) bump(l.id);
+  for (const a of state.annotations ?? []) bump(a.id);
   idCounter = max;
+}
+
+const ANN_COLORS = ["#38bdf8", "#34d399", "#fbbf24", "#f472b6", "#a78bfa", "#fb923c"];
+
+export function createAnnotation(
+  kind: AnnotationKind,
+  x: number,
+  y: number,
+  label?: string,
+): Annotation {
+  const color = ANN_COLORS[idCounter % ANN_COLORS.length]!;
+  if (kind === "text") {
+    return {
+      id: uid("ann"),
+      kind: "text",
+      x,
+      y,
+      color,
+      label: label?.trim() || "Nota",
+      fontSize: 16,
+    };
+  }
+  return {
+    id: uid("ann"),
+    kind: "circle",
+    x,
+    y,
+    color,
+    label: label?.trim() || "VLAN",
+    radius: 90,
+    fillOpacity: 0.12,
+  };
+}
+
+export function deleteAnnotation(state: LabState, id: string): LabState {
+  const annotations = (state.annotations ?? []).filter((a) => a.id !== id);
+  return { ...state, annotations };
+}
+
+export function moveAnnotation(
+  state: LabState,
+  id: string,
+  x: number,
+  y: number,
+): LabState {
+  const annotations = (state.annotations ?? []).map((a) =>
+    a.id === id ? { ...a, x, y } : a,
+  );
+  return { ...state, annotations };
+}
+
+export function updateAnnotation(
+  state: LabState,
+  id: string,
+  patch: Partial<Omit<Annotation, "id" | "kind">>,
+): LabState {
+  const annotations = (state.annotations ?? []).map((a) =>
+    a.id === id ? { ...a, ...patch } : a,
+  );
+  return { ...state, annotations };
 }
 
 export function createDevice(
@@ -402,7 +465,7 @@ export function createSubinterface(
 }
 
 export function createEmptyLab(): LabState {
-  return { devices: [], links: [] };
+  return { devices: [], links: [], annotations: [] };
 }
 
 export function createDemoLab(): LabState {

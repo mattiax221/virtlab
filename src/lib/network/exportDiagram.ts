@@ -13,7 +13,8 @@ function downloadBlob(blob: Blob, filename: string) {
 }
 
 function bounds(state: LabState) {
-  if (state.devices.length === 0) {
+  const anns = state.annotations ?? [];
+  if (state.devices.length === 0 && anns.length === 0) {
     return { minX: 0, minY: 0, maxX: 800, maxY: 500, w: 800, h: 500 };
   }
   let minX = Infinity;
@@ -25,6 +26,13 @@ function bounds(state: LabState) {
     minY = Math.min(minY, d.y - 50);
     maxX = Math.max(maxX, d.x + 60);
     maxY = Math.max(maxY, d.y + 50);
+  }
+  for (const a of anns) {
+    const r = a.kind === "circle" ? (a.radius ?? 90) : 40;
+    minX = Math.min(minX, a.x - r);
+    minY = Math.min(minY, a.y - r);
+    maxX = Math.max(maxX, a.x + r);
+    maxY = Math.max(maxY, a.y + r);
   }
   const pad = 40;
   minX -= pad;
@@ -50,6 +58,26 @@ export function buildTopologySvg(state: LabState): string {
   );
   lines.push(`<rect x="${b.minX}" y="${b.minY}" width="${b.w}" height="${b.h}" fill="#0f172a"/>`);
   lines.push(`<text x="${b.minX + 16}" y="${b.minY + 24}" fill="#94a3b8" font-size="14" font-family="system-ui">NetLab</text>`);
+
+  for (const a of state.annotations ?? []) {
+    if (a.kind === "circle") {
+      const r = a.radius ?? 90;
+      const op = a.fillOpacity ?? 0.12;
+      lines.push(
+        `<circle cx="${a.x}" cy="${a.y}" r="${r}" fill="${a.color}" fill-opacity="${op}" stroke="${a.color}" stroke-width="2" stroke-dasharray="6 4"/>`,
+      );
+      if (a.label) {
+        lines.push(
+          `<text x="${a.x}" y="${a.y - r + 16}" text-anchor="middle" fill="${a.color}" font-size="12" font-family="system-ui" font-weight="600">${escapeXml(a.label)}</text>`,
+        );
+      }
+    } else {
+      const fs = a.fontSize ?? 16;
+      lines.push(
+        `<text x="${a.x}" y="${a.y}" text-anchor="middle" fill="${a.color}" font-size="${fs}" font-family="system-ui" font-weight="600">${escapeXml(a.label || "Nota")}</text>`,
+      );
+    }
+  }
 
   for (const link of state.links) {
     const a = state.devices.find((d) => d.id === link.aDeviceId);

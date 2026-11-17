@@ -470,9 +470,32 @@ export type Link = {
   wifiKey?: string;
 };
 
+/** Annotazione didattica sul canvas (non è un dispositivo di rete). */
+export type AnnotationKind = "text" | "circle";
+
+export type Annotation = {
+  id: string;
+  kind: AnnotationKind;
+  /** Centro (cerchio) o punto di ancoraggio (testo), stesso sistema di Device.x/y */
+  x: number;
+  y: number;
+  /** Colore stroke/testo, es. "#38bdf8" */
+  color: string;
+  /** Contenuto del testo o etichetta del cerchio (es. "VLAN 10") */
+  label: string;
+  /** Solo testo */
+  fontSize?: number;
+  /** Solo cerchio: raggio in px */
+  radius?: number;
+  /** Solo cerchio: opacità del riempimento 0–1 */
+  fillOpacity?: number;
+};
+
 export type LabState = {
   devices: Device[];
   links: Link[];
+  /** Zone VLAN, note, cerchi… opzionale per lab salvati prima */
+  annotations?: Annotation[];
 };
 
 export type PingHop = {

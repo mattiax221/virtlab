@@ -5,14 +5,18 @@ import { LabStateContext } from "./LabStateContext";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   connectDevices,
+  createAnnotation,
   createDemoLab,
   createDevice,
   createEmptyLab,
+  deleteAnnotation,
   deleteDevice,
   deleteLink,
+  moveAnnotation,
   moveDevice,
   nextDeviceName,
   reserveIdsFrom,
+  updateAnnotation,
 } from "@/lib/network/engine";
 import { CABLE_META, PT_PALETTE, type CableKind } from "@/lib/network/catalog";
 import {
@@ -53,6 +57,7 @@ import {
   isWifiCapable,
   isWirelessClient,
   isWlc,
+  type Annotation,
   type Device,
   type DeviceKind,
   type LabState,
@@ -62,6 +67,7 @@ const GRID = 28;
 function snap(n: number): number {
   return Math.round(n / GRID) * GRID;
 }
+import { AnnotationEditor } from "./AnnotationEditor";
 import { ContextMenu, type MenuItem } from "./ContextMenu";
 import { DeviceIcon } from "./DeviceIcon";
 import { PortPicker } from "./PortPicker";
@@ -81,7 +87,7 @@ import { WifiApPanel } from "./WifiApPanel";
 import { WifiClientPanel } from "./WifiClientPanel";
 import { WindowsDesktop } from "./WindowsDesktop";
 
-type Tool = "select" | "cable" | "delete" | "simulate";
+type Tool = "select" | "cable" | "delete" | "simulate" | "text" | "circle";
 
 /** Collegamento in corso stile Packet Tracer (scelta porta) */
 type CableDraft = {
@@ -101,6 +107,7 @@ type OpenMode =
 
 type CtxTarget =
   | { kind: "device"; id: string }
+  | { kind: "ann"; id: string }
   | { kind: "link"; id: string }
   | { kind: "palette"; type: DeviceKind }
   | { kind: "canvas" };
@@ -175,10 +182,12 @@ type PortLabelBox = { x: number; y: number; w: number };
  */
 function layoutPortLabels(
   state: LabState,
-  drag: { id: string; x: number; y: number; moved: boolean } | null,
+  drag: { kind?: "device" | "ann"; id: string; x: number; y: number; moved: boolean } | null,
 ): Map<string, PortLabelBox> {
   const pos = (d: Device) =>
-    drag?.id === d.id && drag.moved ? { x: drag.x, y: drag.y } : { x: d.x, y: d.y };
+    drag?.kind === "device" && drag.id === d.id && drag.moved
+      ? { x: drag.x, y: drag.y }
+      : { x: d.x, y: d.y };
   const out = new Map<string, PortLabelBox>();
   const placed: { x: number; y: number; w: number }[] = [];
   // ingombro di icona + nome sotto ogni dispositivo
@@ -240,7 +249,13 @@ export function LabWorkspace({ viewOnly }: { viewOnly?: LabViewOnly } = {}) {
   // Autosave solo dopo il boot (evita wipe del lab precedente con empty)
   useEffect(() => {
     if (!bootDoneRef.current) return;
-    if (state.devices.length === 0 && state.links.length === 0) return;
+    if (
+      state.devices.length === 0 &&
+      state.links.length === 0 &&
+      !(state.annotations?.length)
+    ) {
+      return;
+    }
     autosaveLab(state);
   }, [state]);
 
@@ -248,10 +263,13 @@ export function LabWorkspace({ viewOnly }: { viewOnly?: LabViewOnly } = {}) {
   const [cableKind, setCableKind] = useState<CableKind>("auto");
   const [cableDraft, setCableDraft] = useState<CableDraft | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedAnnId, setSelectedAnnId] = useState<string | null>(null);
+  const [editAnnId, setEditAnnId] = useState<string | null>(null);
   const [openDeviceId, setOpenDeviceId] = useState<string | null>(null);
   const [openMode, setOpenMode] = useState<OpenMode | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [drag, setDrag] = useState<{
+    kind: "device" | "ann";
     id: string;
     ox: number;
     oy: number;
@@ -518,7 +536,9 @@ export function LabWorkspace({ viewOnly }: { viewOnly?: LabViewOnly } = {}) {
 
   const confirmNewLab = useCallback(() => {
     const dirty =
-      stateRef.current.devices.length > 0 || stateRef.current.links.length > 0;
+      stateRef.current.devices.length > 0 ||
+      stateRef.current.links.length > 0 ||
+      (stateRef.current.annotations?.length ?? 0) > 0;
     if (
       dirty &&
       !window.confirm(
@@ -533,6 +553,8 @@ export function LabWorkspace({ viewOnly }: { viewOnly?: LabViewOnly } = {}) {
     setOpenDeviceId(null);
     setOpenMode(null);
     setSelectedId(null);
+    setSelectedAnnId(null);
+    setEditAnnId(null);
     setCableDraft(null);
     showToast("Nuovo lab vuoto");
   }, [applyState, showToast, detachCloud]);
@@ -682,15 +704,46 @@ export function LabWorkspace({ viewOnly }: { viewOnly?: LabViewOnly } = {}) {
       return;
     }
     setSelectedId(device.id);
+    setSelectedAnnId(null);
     const rect = canvasRef.current?.getBoundingClientRect();
     if (!rect) return;
     dragSnapRef.current = { x: device.x, y: device.y };
     setDrag({
+      kind: "device",
       id: device.id,
       ox: e.clientX - rect.left - device.x,
       oy: e.clientY - rect.top - device.y,
       x: device.x,
       y: device.y,
+      moved: false,
+    });
+    (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+  }
+
+  function onAnnPointerDown(e: React.PointerEvent, ann: Annotation) {
+    if (e.button === 2) return;
+    e.stopPropagation();
+    setCtx(null);
+    if (tool === "delete") {
+      applyState((s) => deleteAnnotation(s, ann.id));
+      if (editAnnId === ann.id) setEditAnnId(null);
+      setSelectedAnnId(null);
+      showToast("Annotazione eliminata");
+      return;
+    }
+    if (tool !== "select") return;
+    setSelectedAnnId(ann.id);
+    setSelectedId(null);
+    const rect = canvasRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    dragSnapRef.current = { x: ann.x, y: ann.y };
+    setDrag({
+      kind: "ann",
+      id: ann.id,
+      ox: e.clientX - rect.left - ann.x,
+      oy: e.clientY - rect.top - ann.y,
+      x: ann.x,
+      y: ann.y,
       moved: false,
     });
     (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
@@ -721,14 +774,22 @@ export function LabWorkspace({ viewOnly }: { viewOnly?: LabViewOnly } = {}) {
     const prev = dragSnapRef.current;
     if (!moved || (prev && prev.x === sx && prev.y === sy)) return;
     dragSnapRef.current = { x: sx, y: sy };
-    setState((s) => moveDevice(s, drag.id, sx, sy));
+    setState((s) =>
+      drag.kind === "ann"
+        ? moveAnnotation(s, drag.id, sx, sy)
+        : moveDevice(s, drag.id, sx, sy),
+    );
   }
 
   function endDrag() {
     if (drag && drag.moved) {
       const sx = snap(drag.x);
       const sy = snap(drag.y);
-      setState((s) => moveDevice(s, drag.id, sx, sy));
+      setState((s) =>
+        drag.kind === "ann"
+          ? moveAnnotation(s, drag.id, sx, sy)
+          : moveDevice(s, drag.id, sx, sy),
+      );
     }
     dragSnapRef.current = null;
     setDrag(null);
@@ -805,6 +866,30 @@ export function LabWorkspace({ viewOnly }: { viewOnly?: LabViewOnly } = {}) {
       ];
     }
 
+    if (ctx.target.kind === "ann") {
+      const id = ctx.target.id;
+      const ann = (state.annotations ?? []).find((a) => a.id === id);
+      if (!ann) return [];
+      return [
+        {
+          type: "item",
+          label: "Modifica…",
+          onClick: () => setEditAnnId(ann.id),
+        },
+        {
+          type: "item",
+          label: "Elimina",
+          danger: true,
+          onClick: () => {
+            applyState((s) => deleteAnnotation(s, ann.id));
+            setSelectedAnnId(null);
+            if (editAnnId === ann.id) setEditAnnId(null);
+            showToast("Annotazione eliminata");
+          },
+        },
+      ];
+    }
+
     if (ctx.target.kind === "link") {
       const id = ctx.target.id;
       const link = state.links.find((l) => l.id === id);
@@ -858,6 +943,23 @@ export function LabWorkspace({ viewOnly }: { viewOnly?: LabViewOnly } = {}) {
     return [
       {
         type: "item",
+        label: "Aggiungi testo…",
+        onClick: () => {
+          setTool("text");
+          showToast("Clicca sul canvas per posizionare il testo");
+        },
+      },
+      {
+        type: "item",
+        label: "Aggiungi cerchio VLAN…",
+        onClick: () => {
+          setTool("circle");
+          showToast("Clicca sul canvas per disegnare una zona");
+        },
+      },
+      { type: "sep" },
+      {
+        type: "item",
         label: "Carica demo LAN",
         onClick: () => {
           applyState(createDemoLab());
@@ -905,7 +1007,9 @@ export function LabWorkspace({ viewOnly }: { viewOnly?: LabViewOnly } = {}) {
     ctx,
     state.devices,
     state.links,
+    state.annotations,
     openDeviceId,
+    editAnnId,
     openDeviceUi,
     showToast,
     addDevice,
@@ -924,7 +1028,15 @@ export function LabWorkspace({ viewOnly }: { viewOnly?: LabViewOnly } = {}) {
         setCableDraft(null);
         setInspectId(null);
         setShowExport(false);
-        if (tool === "cable" || tool === "delete") setTool("select");
+        setEditAnnId(null);
+        if (
+          tool === "cable" ||
+          tool === "delete" ||
+          tool === "text" ||
+          tool === "circle"
+        ) {
+          setTool("select");
+        }
       }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z" && !e.shiftKey) {
         const tag = (e.target as HTMLElement)?.tagName;
@@ -944,31 +1056,60 @@ export function LabWorkspace({ viewOnly }: { viewOnly?: LabViewOnly } = {}) {
         redo();
         return;
       }
-      if (
-        (e.key === "Delete" || e.key === "Backspace") &&
-        selectedId &&
-        !openDeviceId
-      ) {
+      if ((e.key === "Delete" || e.key === "Backspace") && !openDeviceId && !editAnnId) {
         const tag = (e.target as HTMLElement)?.tagName;
         if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
-        e.preventDefault();
-        applyState((s) => deleteDevice(s, selectedId));
-        showToast("Eliminato");
-        setSelectedId(null);
+        if (selectedAnnId) {
+          e.preventDefault();
+          applyState((s) => deleteAnnotation(s, selectedAnnId));
+          showToast("Eliminato");
+          setSelectedAnnId(null);
+          return;
+        }
+        if (selectedId) {
+          e.preventDefault();
+          applyState((s) => deleteDevice(s, selectedId));
+          showToast("Eliminato");
+          setSelectedId(null);
+        }
       }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [selectedId, openDeviceId, tool, showToast, undo, redo, applyState]);
+  }, [
+    selectedId,
+    selectedAnnId,
+    openDeviceId,
+    editAnnId,
+    tool,
+    showToast,
+    undo,
+    redo,
+    applyState,
+  ]);
 
   const portLabels = useMemo(() => layoutPortLabels(state, drag), [state, drag]);
-  const canvasExtent = useMemo(
-    () => ({
-      w: Math.max(0, ...state.devices.map((d) => d.x)) + 90,
-      h: Math.max(0, ...state.devices.map((d) => d.y)) + 90,
-    }),
-    [state.devices],
+  const annotations = useMemo(
+    () => state.annotations ?? [],
+    [state.annotations],
   );
+  const editAnn = editAnnId
+    ? annotations.find((a) => a.id === editAnnId) ?? null
+    : null;
+  const canvasExtent = useMemo(() => {
+    const xs = [
+      ...state.devices.map((d) => d.x),
+      ...annotations.map((a) => a.x + (a.kind === "circle" ? (a.radius ?? 90) : 40)),
+    ];
+    const ys = [
+      ...state.devices.map((d) => d.y),
+      ...annotations.map((a) => a.y + (a.kind === "circle" ? (a.radius ?? 90) : 24)),
+    ];
+    return {
+      w: Math.max(0, ...xs) + 90,
+      h: Math.max(0, ...ys) + 90,
+    };
+  }, [state.devices, annotations]);
 
   return (
     <LabStateContext.Provider value={state}>
@@ -1008,6 +1149,13 @@ export function LabWorkspace({ viewOnly }: { viewOnly?: LabViewOnly } = {}) {
         >
           Changelog
         </a>
+        <a
+          href="/feedback"
+          className="rounded px-2 py-1.5 text-[11px] text-slate-400 hover:bg-slate-800 hover:text-sky-300 touch-manipulation sm:py-1"
+          title="Segnala bug o proponi idee"
+        >
+          Bug/idee
+        </a>
         <div className="mx-1 hidden h-4 w-px bg-slate-700 sm:block" />
 
         <div className="flex flex-wrap items-center gap-1">
@@ -1046,6 +1194,30 @@ export function LabWorkspace({ viewOnly }: { viewOnly?: LabViewOnly } = {}) {
             ))}
           </select>
         )}
+        <ToolButton
+          active={tool === "text"}
+          onClick={() => {
+            setTool("text");
+            setCableDraft(null);
+            setSimFrom(null);
+            showToast("Testo: clicca sul canvas (doppio clic per modificare)");
+          }}
+          title="Etichetta di testo sul canvas"
+        >
+          Testo
+        </ToolButton>
+        <ToolButton
+          active={tool === "circle"}
+          onClick={() => {
+            setTool("circle");
+            setCableDraft(null);
+            setSimFrom(null);
+            showToast("Cerchio: clicca per una zona VLAN / area");
+          }}
+          title="Cerchio per dividere VLAN o aree"
+        >
+          Cerchio
+        </ToolButton>
         <ToolButton
           active={tool === "delete"}
           onClick={() => {
@@ -1249,14 +1421,92 @@ export function LabWorkspace({ viewOnly }: { viewOnly?: LabViewOnly } = {}) {
             // Non annullare il drag: con pointer capture continua sul canvas
             if (!cableDraft && !drag) setCableCursor(null);
           }}
-          onClick={() => {
+          onClick={(e) => {
             setCtx(null);
-            if (tool === "select") setSelectedId(null);
             setInspectId(null);
+            if (tool === "select") {
+              setSelectedId(null);
+              setSelectedAnnId(null);
+              return;
+            }
+            if (viewOnly || (tool !== "text" && tool !== "circle")) return;
+            const rect = canvasRef.current?.getBoundingClientRect();
+            if (!rect) return;
+            const x = snap(e.clientX - rect.left);
+            const y = snap(e.clientY - rect.top);
+            const ann = createAnnotation(
+              tool,
+              x,
+              y,
+              tool === "circle" ? "VLAN" : "Nota",
+            );
+            applyState((s) => ({
+              ...s,
+              annotations: [...(s.annotations ?? []), ann],
+            }));
+            setSelectedAnnId(ann.id);
+            setSelectedId(null);
+            setTool("select");
+            setEditAnnId(ann.id);
+            showToast(tool === "circle" ? "Zona aggiunta" : "Testo aggiunto");
           }}
           onContextMenu={(e) => openContext(e, { kind: "canvas" })}
         >
           <svg className="absolute inset-0 h-full w-full" style={{ pointerEvents: "none" }}>
+            {(state.annotations ?? [])
+              .filter((a) => a.kind === "circle")
+              .map((ann) => {
+                const x =
+                  drag?.kind === "ann" && drag.id === ann.id && drag.moved
+                    ? drag.x
+                    : ann.x;
+                const y =
+                  drag?.kind === "ann" && drag.id === ann.id && drag.moved
+                    ? drag.y
+                    : ann.y;
+                const r = ann.radius ?? 90;
+                const selected = selectedAnnId === ann.id;
+                return (
+                  <g
+                    key={ann.id}
+                    style={{ pointerEvents: "auto", cursor: "grab" }}
+                    onPointerDown={(ev) => onAnnPointerDown(ev, ann)}
+                    onDoubleClick={(ev) => {
+                      ev.stopPropagation();
+                      setEditAnnId(ann.id);
+                      setSelectedAnnId(ann.id);
+                    }}
+                    onContextMenu={(ev) =>
+                      openContext(ev, { kind: "ann", id: ann.id })
+                    }
+                    onClick={(ev) => ev.stopPropagation()}
+                  >
+                    <circle
+                      cx={x}
+                      cy={y}
+                      r={r}
+                      fill={ann.color}
+                      fillOpacity={ann.fillOpacity ?? 0.12}
+                      stroke={ann.color}
+                      strokeWidth={selected ? 3 : 2}
+                      strokeDasharray="7 5"
+                    />
+                    {ann.label ? (
+                      <text
+                        x={x}
+                        y={y - r + 18}
+                        textAnchor="middle"
+                        fill={ann.color}
+                        fontSize={13}
+                        fontWeight={600}
+                        style={{ pointerEvents: "none" }}
+                      >
+                        {ann.label}
+                      </text>
+                    ) : null}
+                  </g>
+                );
+              })}
             {state.links.map((link) => {
               const a = state.devices.find((d) => d.id === link.aDeviceId);
               const b = state.devices.find((d) => d.id === link.bDeviceId);
@@ -1464,14 +1714,56 @@ export function LabWorkspace({ viewOnly }: { viewOnly?: LabViewOnly } = {}) {
             </span>
           </div>
 
-          {state.devices.length === 0 && (
+          {state.devices.length === 0 && annotations.length === 0 && (
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
               <p className="max-w-sm text-center text-sm text-slate-500">
-                Canvas vuoto — scegli un dispositivo dalla barra sotto
-                (stile Packet Tracer).
+                Canvas vuoto — scegli un dispositivo dalla barra sotto, oppure
+                usa Testo / Cerchio per etichette e zone VLAN.
               </p>
             </div>
           )}
+
+          {annotations
+            .filter((a) => a.kind === "text")
+            .map((ann) => {
+              const x =
+                drag?.kind === "ann" && drag.id === ann.id && drag.moved
+                  ? drag.x
+                  : ann.x;
+              const y =
+                drag?.kind === "ann" && drag.id === ann.id && drag.moved
+                  ? drag.y
+                  : ann.y;
+              return (
+                <button
+                  key={ann.id}
+                  type="button"
+                  className={`absolute -translate-x-1/2 -translate-y-1/2 rounded px-2 py-1 font-semibold shadow-sm ${
+                    selectedAnnId === ann.id
+                      ? "ring-2 ring-sky-400 bg-slate-950/70"
+                      : "hover:bg-slate-950/40"
+                  }`}
+                  style={{
+                    left: x,
+                    top: y,
+                    color: ann.color,
+                    fontSize: ann.fontSize ?? 16,
+                    cursor: drag?.id === ann.id ? "grabbing" : "grab",
+                    zIndex: 5,
+                  }}
+                  onPointerDown={(e) => onAnnPointerDown(e, ann)}
+                  onDoubleClick={(e) => {
+                    e.stopPropagation();
+                    setEditAnnId(ann.id);
+                    setSelectedAnnId(ann.id);
+                  }}
+                  onContextMenu={(e) => openContext(e, { kind: "ann", id: ann.id })}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {ann.label || "Nota"}
+                </button>
+              );
+            })}
 
           {state.devices.map((device) => {
             const printBusy =
@@ -1498,15 +1790,23 @@ export function LabWorkspace({ viewOnly }: { viewOnly?: LabViewOnly } = {}) {
                 }`}
                 style={{
                   left:
-                    drag?.id === device.id && drag.moved ? drag.x : device.x,
+                    drag?.kind === "device" && drag.id === device.id && drag.moved
+                      ? drag.x
+                      : device.x,
                   top:
-                    drag?.id === device.id && drag.moved ? drag.y : device.y,
+                    drag?.kind === "device" && drag.id === device.id && drag.moved
+                      ? drag.y
+                      : device.y,
                   transition:
-                    drag?.id === device.id
+                    drag?.kind === "device" && drag.id === device.id
                       ? "none"
                       : "left 120ms ease-out, top 120ms ease-out",
-                  zIndex: drag?.id === device.id ? 30 : undefined,
-                  cursor: drag?.id === device.id ? "grabbing" : "grab",
+                  zIndex:
+                    drag?.kind === "device" && drag.id === device.id ? 30 : undefined,
+                  cursor:
+                    drag?.kind === "device" && drag.id === device.id
+                      ? "grabbing"
+                      : "grab",
                 }}
                 onPointerDown={(e) => onDevicePointerDown(e, device)}
                 onDoubleClick={(e) => {
@@ -1520,7 +1820,9 @@ export function LabWorkspace({ viewOnly }: { viewOnly?: LabViewOnly } = {}) {
                 <DeviceIcon
                   type={device.type}
                   className={`h-11 w-11 drop-shadow-lg ${
-                    drag?.id === device.id && drag.moved ? "opacity-90" : ""
+                    drag?.kind === "device" && drag.id === device.id && drag.moved
+                      ? "opacity-90"
+                      : ""
                   }`}
                 />
                 <span
@@ -1790,6 +2092,22 @@ export function LabWorkspace({ viewOnly }: { viewOnly?: LabViewOnly } = {}) {
           y={ctx.y}
           items={menuItems}
           onClose={() => setCtx(null)}
+        />
+      )}
+
+      {editAnn && (
+        <AnnotationEditor
+          annotation={editAnn}
+          onClose={() => setEditAnnId(null)}
+          onSave={(patch) => {
+            applyState((s) => updateAnnotation(s, editAnn.id, patch));
+          }}
+          onDelete={() => {
+            applyState((s) => deleteAnnotation(s, editAnn.id));
+            setSelectedAnnId(null);
+            setEditAnnId(null);
+            showToast("Annotazione eliminata");
+          }}
         />
       )}
 

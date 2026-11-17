@@ -23,7 +23,17 @@ export function parseLabJson(raw: string): { state?: LabState; error?: string } 
     if (malformed) {
       return { error: "JSON non valido: dispositivi incompleti." };
     }
-    const state: LabState = { devices: data.devices, links: data.links };
+    const annotations = Array.isArray(data.annotations)
+      ? data.annotations.filter(
+          (a) =>
+            a &&
+            typeof a.id === "string" &&
+            (a.kind === "text" || a.kind === "circle") &&
+            typeof a.x === "number" &&
+            typeof a.y === "number",
+        )
+      : [];
+    const state: LabState = { devices: data.devices, links: data.links, annotations };
     reserveIdsFrom(state);
     return { state };
   } catch {
@@ -63,7 +73,12 @@ export function loadAutosave(): LabState | null {
 /** True se c’è un lab non vuoto in autosave. */
 export function hasAutosaveLab(): boolean {
   const s = loadAutosave();
-  return !!s && (s.devices.length > 0 || s.links.length > 0);
+  return (
+    !!s &&
+    (s.devices.length > 0 ||
+      s.links.length > 0 ||
+      (s.annotations?.length ?? 0) > 0)
+  );
 }
 
 export function clearAutosave() {
