@@ -62,11 +62,12 @@ prima del deploy:
 In Authentication → URL Configuration aggiungi il redirect
 `https://<dominio>/auth/callback` (in locale `http://127.0.0.1:43127/auth/callback`).
 
-Applica lo schema con i due file, in ordine
+Applica lo schema con i file, in ordine
 (SQL editor di Supabase, oppure `supabase db push`):
 
 1. `supabase/migrations/20261113120000_profiles.sql`
 2. `supabase/migrations/20261113130000_classi_lab_consegne.sql`
+3. `supabase/migrations/20261117100000_feedback.sql` (bacheca Bug e idee)
 
 Ruoli: `user` (allievo), `teacher` (docente), `admin` (amministratore).
 Il vecchio ruolo `viewer` diventa `teacher` con la seconda migrazione.

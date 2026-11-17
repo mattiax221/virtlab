@@ -81,6 +81,10 @@ export default function ChangelogPage() {
           <Link href="/comandi" className="hover:text-sky-300">
             Comandi
           </Link>
+          <span aria-hidden>·</span>
+          <Link href="/feedback" className="hover:text-sky-300">
+            Bug e idee
+          </Link>
         </div>
 
         <h1 className="mt-6 font-display text-4xl font-bold tracking-tight text-white sm:text-5xl">
