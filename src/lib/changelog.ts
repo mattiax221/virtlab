@@ -404,7 +404,7 @@ export const releases: ChangelogEntry[] = [
       "Se manca ancora la migrazione classi/consegne, l’amministrazione resta usabile sull’elenco utenti (con banner). Nella scheda Utenti compare quanti laboratori online ha salvato ciascuno.",
   },
   {
-    sha: "PENDING",
+    sha: "e87940b",
     date: "2026-11-17",
     title: "Bacheca bug/idee e annotazioni canvas (testo e cerchi VLAN)",
     detail:
